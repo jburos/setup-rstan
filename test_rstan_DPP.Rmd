@@ -136,7 +136,9 @@ ggplot(restaurant, aes(x = value, group = table_id, colour = factor(table_id))) 
 
 ## Rescaling data 
 
-Now, let's simulate the data analysis process, which would typically rescale values prior to analysis.
+Now, let's simulate the data analysis process which will be ignorant of true cluster IDs. 
+
+First, we would rescale values according to observed mean & sd.
 
 ```{r rescale-data}
 restaurant <- restaurant %>%
@@ -163,29 +165,30 @@ data {
 
 parameters {
   simplex[K] proportions;
-  real theta[K]; ## means for each group
-  real sigma; ## overall sigma; does not vary by group
+  ordered[K] theta; ## means for each group
+  real<lower=0> sigma; ## overall sigma; does not vary by group
 }
 
 model {
   real ps[K]; ## temp holder for log component densities
   
-  ## prior on thetas; normally distributed with mean 0 & sd 1
+  ## prior on thetas; normally distributed with mean 0 and sd 1
   theta ~ normal(0, 1);
-
+  
+  ## for now, no prior on proportions. Should prob be a dirichlet prior
   for (i in 1:n) {
     for (k in 1:K) {
-      ps[k] <- log(proportions[k]) + normal_log(y[n], theta[k], sigma);
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
     }
+    increment_log_prob(log_sum_exp(ps));
   }
-  increment_log_prob(log_sum_exp(ps));
 }
 
 "
 
 ```
 
-Note that we've skipped the "generated quantities" block for now; means we won't be able to do PP checks or run loo.
+Note that we've skipped the "generated quantities" block for now; means we won't be able to do PP checks or run loo. We'll add it back in once we have a model that works well.
 
 ## Fitting the model in Stan
 
@@ -194,16 +197,17 @@ stan_samples <- stan(model_code = model_string,
                      iter = iter,
                      data = list(y = restaurant$rescaled_value,
                                  n = nrow(restaurant),
-                                 K = 5)
+                                 K = 5),
+                     model_name = 'Simple mixture model with K = 5'
                      )
 
 # summarize outcome of interest
 print(stan_samples, pars = 'theta')
 ```
 
-## Evaluating model fit 
+### Evaluating model fit 
 
-### Review traceplot for theta - main parameter of interest 
+Review traceplot for theta - main parameter of interest 
 
 ```{r eval-traceplot}
 traceplot(stan_samples, pars = 'theta')
@@ -221,19 +225,300 @@ Next, since we are dealing with simulated data, we can compare the values of our
 
 It's unlikely that the true value would be well outside our posterior distribution for theta, but it's possible.
 
+First we do some data-prep to collect & transform the values of theta toput them on the original scale.
+
 ```{r summarize-theta}
 
+## true values, on original scale
+true_thetas <- unique(restaurant$theta)
+true_thetas <- true_thetas[order(true_thetas)]
+
+## save, so we can transform thetahat to original scale
+global_mean <- unique(restaurant$global_mean)
+global_sd <- unique(restaurant$global_sd)
+
+# matrix of estimated values, on modified (rescaled) scale
 thetahat <- unlist(rstan::extract(stan_samples, 'theta')$theta)
 
+# modify into a dataset
 rownames(thetahat) <- seq(from = 1, to = nrow(thetahat), by = 1)
 colnames(thetahat) <- seq(from = 1, to = 5, by = 1)
 thdata <- as.data.frame(thetahat) %>%
   mutate(iter = n()) %>%
-  tidyr::gather(sample, mean, 1:5, convert = T)
-  
+  tidyr::gather(sample, mean_rescaled, 1:5, convert = T) %>%
+  mutate(mean_original = (mean_rescaled * global_sd) + global_mean)
+```
+
+Next, we plot the observed & true means on the recentered scale
+
+```{r plot-true-vs-observed-recentered}
 library(ggplot2)
 ggplot() +
-  geom_density(aes(x = mean, group = sample, colour = 'estimated theta'), data = thdata) +
+  geom_density(aes(x = mean_rescaled, group = sample, colour = 'estimated theta'), data = thdata) +
   geom_vline(aes(xintercept = mean, colour = 'true theta values'), data = restaurant %>% group_by(table_id) %>% summarize(mean = mean(rescaled_value, na.rm = T)) %>% ungroup())
+```
+
+And, the observed vs true estimates of theta
+
+```{r plot-true-vs-observed}
+library(ggplot2)
+ggplot() +
+  geom_density(aes(x = mean_original, group = sample, colour = 'estimated theta'), data = thdata) +
+  geom_vline(aes(xintercept = true_thetas, colour = 'true theta values'))
+```
+
+We notice that even though we have constrained the values of theta to be ordered, there are still some label-switching problems. 
+
+IE each 'sample' has a multi-modal distribution of theta. Collapsing these may yield a more complete picture.
+
+```{r plot-true-vs-observed}
+library(ggplot2)
+ggplot() +
+  geom_density(aes(x = mean_original, colour = 'estimated theta'), data = thdata) +
+  geom_vline(aes(xintercept = true_thetas, colour = 'true theta values'))
+```
+
+Notice how the smoothed estimates look more consistent with a 3-cluster result (ie K = 3), rather than the true value (K = 5).
+
+Let's see if Loo can help us distinguish between different values of K.
+
+## Using Loo to find optimal values of K
+
+[Loo](http://www.stat.columbia.edu/~gelman/research/unpublished/loo_stan.pdf) approximates leave-one-out validation, and can be used to identify observations with undue influence (leverage) on the model and/or for model comparison. 
+
+In this case, we will use Loo for sanity checking & to compare model fit under different values of K.
+
+### Writing the generated quantities block
+
+In order to use Loo, we need to first calculate the log_liklihood in the generated quantities block.
+
+Our revised model string will look like this: 
+
+```{r model-definition-with-genquant}
+model_string_with_loglik <- "
+data {
+  int n;
+  real y[n];
+  int K; ## presumed number of groups
+}
+
+parameters {
+  simplex[K] proportions;
+  ordered[K] theta; ## means for each group
+  real<lower=0> sigma; ## overall sigma; does not vary by group
+}
+
+model {
+  ## prior on thetas; normally distributed with mean 0 and sd 1
+  theta ~ normal(0, 1);
+  
+  ## for now, no prior on proportions. Should prob be a dirichlet prior
+  for (i in 1:n) {
+    real ps[K]; ## temp holder for log component densities
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
+    }
+    increment_log_prob(log_sum_exp(ps));
+  }
+}
+
+generated quantities {
+  real log_lik[n];
+  
+  for (i in 1:n) {
+    real ps[K]; ## temp holder for log component densities
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
+    }
+    log_lik[i] <- log_sum_exp(ps);
+  }
+}
+"
+```
+
+Let's do a quick sanity check to see if the model works as it did before.
+
+```{r sanity-check-post-log-lik}
+stan_samples_k5 <- stan(model_code = model_string_with_loglik,
+                     iter = iter,
+                     data = list(y = restaurant$rescaled_value,
+                                 n = nrow(restaurant),
+                                 K = 5),
+                     model_name = 'Simple mixture model with K = 5 (v2)'
+                     )
+
+# summarize outcome of interest
+print(stan_samples_k5, pars = 'theta')
+```
+
+### Loo with k = 5 
+
+```{r loo-sample-k5}
+loo_k5 <- loo(rstan::extract(stan_samples_k5, 'log_lik')$log_lik)
+```
+
+### Estimating model with k = 3,4 and 5
+
+(note: output is hidden for sake of brevity)
+
+```{r stan-example-k3, collapse=TRUE, results = 'hide'}
+## K = 2
+stan_samples_k2 <- stan(model_code = model_string_with_loglik,
+                     iter = iter,
+                     data = list(y = restaurant$rescaled_value,
+                                 n = nrow(restaurant),
+                                 K = 2),
+                     model_name = 'Simple mixture model with K = 2 (v2)'
+                     )
+
+print(stan_samples_k2, pars = 'theta')
+loo_k2 <- loo(rstan::extract(stan_samples_k2, 'log_lik')$log_lik)
+
+## K = 3
+stan_samples_k3 <- stan(model_code = model_string_with_loglik,
+                     iter = iter,
+                     data = list(y = restaurant$rescaled_value,
+                                 n = nrow(restaurant),
+                                 K = 3),
+                     model_name = 'Simple mixture model with K = 3 (v2)'
+                     )
+
+print(stan_samples_k3, pars = 'theta')
+loo_k3 <- loo(rstan::extract(stan_samples_k3, 'log_lik')$log_lik)
+
+## K = 4
+stan_samples_k4 <- stan(model_code = model_string_with_loglik,
+                     iter = iter,
+                     data = list(y = restaurant$rescaled_value,
+                                 n = nrow(restaurant),
+                                 K = 4),
+                     model_name = 'Simple mixture model with K = 4 (v2)'
+                     )
+
+# summarize outcome of interest
+print(stan_samples_k4, pars = 'theta')
+loo_k4 <- loo(rstan::extract(stan_samples_k4, 'log_lik')$log_lik)
+
+```
+
+### Comparing model fit using Loo
+
+Note that higher values of elpd_loo are better -- so the first model (loo_k4) listed here is likely the "best"" fit.
+
+```{r compare-model-fit-loo}
+loo::compare(loo_k2, loo_k3, loo_k4, loo_k5)
+```
+
+The relative differences between the models with k = 3, 4, and 5 are fairly small, however.
+
+The biggest gain is seen between models with K = 2 vs K = 3: 
+
+```{r compare-k2-vs-k3}
+loo::compare(loo_k2, loo_k3)
+```
+
+Looking at K = 3 vs K = 4, however, the difference is minimal:
+
+```{r compare-k3-vs-k4}
+loo::compare(loo_k3, loo_k4)
+```
+
+And, actually worsens for K = 4 vs K = 5
+
+```{r compare-k4-vs-k5}
+loo::compare(loo_k4, loo_k5)
+```
+
+Based on these results, the best fits have K = 3 or K = 4. Ideal result will likely be an average of the two models.
+
+## Improving the model using Dirichlet prior 
+
+Now that we have a reasonably-well-fitting mixture model, let's see how this can be improved by incorporating a Dirichlet prior.
+
+Since our data were generated according to a dirichlet process (at least we think they were!), it's plausible that this prior may yield a distribution of group sizes that better match our data.
+
+```{r model-definition-with-DPP}
+model_string_with_dp <- "
+data {
+  int n;
+  real y[n];
+  int K; ## presumed number of groups
+}
+
+parameters {
+  simplex[K] proportions;
+  ordered[K] theta; ## means for each group
+  real<lower=0> sigma; ## overall sigma; does not vary by group
+  positive_ordered[K] alpha;
+}
+
+model {
+  ## prior on thetas; normally distributed with mean 0 and sd 1
+  theta ~ normal(0, 1);
+  proportions ~ dirichlet(alpha);
+  
+  ## for now, no prior on proportions. Should prob be a dirichlet prior
+  for (i in 1:n) {
+    real ps[K]; ## temp holder for log component densities
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
+    }
+    increment_log_prob(log_sum_exp(ps));
+  }
+}
+
+generated quantities {
+  real log_lik[n];
+  
+  for (i in 1:n) {
+    real ps[K]; ## temp holder for log component densities
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
+    }
+    log_lik[i] <- log_sum_exp(ps);
+  }
+}
+"
+```
+
+### Fitting Dirichlet-prior model to data 
+
+Try fitting this revised model to our data. For now, start with K = 5 since that's the "ground truth"
+```{r}
+stan_samples_dp <- stan(model_code = model_string_with_dp,
+                     iter = iter,
+                     data = list(y = restaurant$rescaled_value,
+                                 n = nrow(restaurant),
+                                 K = 5),
+                     model_name = 'Simple mixture model with Dirichlet prior (K = 5)'
+                     )
+
+# summarize outcome of interest
+print(stan_samples_dp, pars = 'theta')
+
+```
+
+Before we go any further, it appears our Rhat values are pretty crappy (ie not close to 1).  Let's increase the number of iterations to see how this improves the model fit.
+
+```{r fit-model-with-dp}
+stan_samples_dp <- stan(model_code = model_string_with_dp,
+                     iter = iter*2,
+                     data = list(y = restaurant$rescaled_value,
+                                 n = nrow(restaurant),
+                                 K = 5),
+                     model_name = 'Simple mixture model with Dirichlet prior (K = 5)'
+                     )
+
+# summarize outcome of interest
+print(stan_samples_dp, pars = 'theta')
+```
+
+### compare dp-derived model to the simple mixture model
+
+```{r compare-dp-to-simple-model}
+
+loo_dp <- loo(extract(stan_samples_dp,'log_lik')$log_lik)
+loo::compare(loo_dp, loo_k5)
+
 ```
 
