@@ -1,0 +1,165 @@
+---
+output: 
+  pdf_document: 
+    fig_height: 4
+    fig_width: 12
+  md_document:
+    variant: markdown_github
+---
+
+```{r knitr_options, include=FALSE}
+library(knitr)
+opts_chunk$set(fig.width=12, 
+               fig.height=4,
+               fig.path='RmdFigs/',
+               warning=FALSE,
+               message=FALSE,
+               NULL)
+
+# install R packages if necessary:
+if (!require("rstan")) 
+  install.packages("rstan", repos="http://cran.rstudio.com")
+if (!require('loo'))
+  install.packages('loo', repos = 'http://cran.rstudio.com')
+if (!require('ggplot2'))
+  install.packages('ggplot2', repos = 'http://cran.rstudio.com')
+if (!require('shinystan'))
+  install.packages('shinystan', repos = 'http://cran.rstudio.com')
+if (!require('tidyr'))
+  install.packages('tidyr', repos = 'http://cran.rstudio.com')
+if (!require('stringr'))
+  install.packages('stringr', repos = 'http://cran.rstudio.com')
+```
+
+
+## Purpose
+
+We're going to test the install of Stan & related packages by simulating some data, fitting a model to those data & evaluating the fit of the model.
+
+## Generating some fake data
+
+```{r gen-data}
+n <- 30
+theta <- 0.2
+iter <- 500
+
+set.seed(123)
+y <- rbinom(n, size = 1, prob = theta)
+```
+
+## Defining the model
+
+This is a simple binomial model using Stan, which should correspond to our simulated data.
+
+```{r model-code}
+
+model_string <- "
+data {
+  int n;
+  int y[n];
+}
+
+parameters {
+  real<lower=0, upper=1> theta;
+}
+
+model {
+  y ~ bernoulli(theta);
+}
+
+generated quantities {
+  int yrep[n];
+  real log_lik[n];
+  
+  for (i in 1:n) {
+    yrep[i] <- bernoulli_rng(theta);
+    log_lik[i] <- bernoulli_log(y[i], theta);
+  }
+}
+"
+
+```
+
+Note that we've included a "generated quantities" block so that we can test *loo* & look at posterior predictive density.
+
+## Fitting the model in Stan
+
+```{r fit-model}
+stan_samples <- stan(model_code = model_string,
+                     iter = iter,
+                     data = list(y = y, n = length(y))
+                     )
+
+# summarize outcome of interest
+print(stan_samples, pars = 'theta')
+```
+
+## Evaluating model fit 
+
+### Review traceplot for theta - main parameter of interest 
+
+```{r eval-traceplot}
+traceplot(stan_samples, pars = 'theta')
+```
+
+### Review 50 & 95% posterior density for theta
+
+```{r eval-theta}
+plot(stan_samples, pars = 'theta')
+```
+
+### Running LOO (leave-one-out validation)
+
+[Loo](http://www.stat.columbia.edu/~gelman/research/unpublished/loo_stan.pdf) approximates leave-one-out validation, and can be used to identify observations with undue influence (leverage) on the model and/or for model comparison. 
+
+Here we are using it as a sanity check on our model fit.
+
+```{r eval-model}
+loo(rstan::extract(stan_samples,'log_lik')$log_lik)
+```
+
+### Posterior predictive checking
+
+Finally, we compare distribution of simulated data (here using the mean of observations from each iteration) to that of observed values used to fit our model.
+
+First we need to do some data manipulation to extract the values of interest from the stan object.
+
+```{r prep-data-compare-estimates}
+
+## note yrep is a matrix with dim = N post-warmup-samples X N obs
+yrep <- rstan::extract(stan_samples, 'yrep')$yrep
+colnames(yrep) <- seq(from = 1, to = n, by = 1)
+rownames(yrep) <- seq(from = 1, to = iter*2, by = 1)
+
+## summarize mean of samples from each iteration 
+ysumm <- apply(yrep, MARGIN = 1, mean)
+
+```
+
+Now we can plot the parameters of interest
+
+```{r compare-estimates}
+## plot density/histogram of iterations, to see how close we are to the truth
+ggplot() + 
+  geom_density(aes(x = ysumm)) +
+  geom_vline(aes(xintercept = mean(y), colour = 'observed mean'))
+```
+
+Note that the estimated samples are very close to our observed mean.
+
+### Comparing estimated theta to true values
+
+Next, since we are dealing with simulated data, we can compare the values of our estimated parameter (*theta*) to the true value used to generate the samples. 
+
+It's unlikely that the true value would be well outside our posterior distribution for theta, but it's possible.
+
+```{r summarize-theta}
+
+thetahat <- unlist(rstan::extract(stan_samples, 'theta')$theta)
+
+library(ggplot2)
+ggplot() +
+  geom_density(aes(x = thetahat, colour = 'estimated theta')) +
+  geom_vline(aes(xintercept = theta, colour = 'true theta'))
+```
+
