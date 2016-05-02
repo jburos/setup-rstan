@@ -1,10 +1,12 @@
 ---
 output: 
-  pdf_document: 
+  pdf_document:
     fig_height: 4
     fig_width: 12
   md_document:
     variant: markdown_github
+    fig_height: 4
+    fig_width: 12
 ---
 
 ```{r knitr_options, include=FALSE}
@@ -40,6 +42,7 @@ library(rstan)
 library(ggplot2)
 library(stringr)
 library(tidyr)
+library(dplyr)
 ```
 
 
@@ -94,7 +97,7 @@ add_customer <- function(thetas, alpha, base_function) {
   }  
     
   restaurant <<- restaurant %>%
-    bind_rows(list(cust_id = cust, table_id = table, theta = theta))
+    dplyr::bind_rows(list(cust_id = cust, table_id = table, theta = theta))
   return(TRUE)
 }
 
@@ -193,6 +196,7 @@ Note that we've skipped the "generated quantities" block for now; means we won't
 ## Fitting the model in Stan
 
 ```{r fit-model}
+iter <- 500
 stan_samples <- stan(model_code = model_string,
                      iter = iter,
                      data = list(y = restaurant$rescaled_value,
@@ -241,7 +245,7 @@ global_sd <- unique(restaurant$global_sd)
 thetahat <- unlist(rstan::extract(stan_samples, 'theta')$theta)
 
 # modify into a dataset
-rownames(thetahat) <- seq(from = 1, to = nrow(thetahat), by = 1)
+#rownames(thetahat) <- seq(from = 1, to = nrow(thetahat), by = 1)
 colnames(thetahat) <- seq(from = 1, to = 5, by = 1)
 thdata <- as.data.frame(thetahat) %>%
   mutate(iter = n()) %>%
@@ -271,7 +275,7 @@ We notice that even though we have constrained the values of theta to be ordered
 
 IE each 'sample' has a multi-modal distribution of theta. Collapsing these may yield a more complete picture.
 
-```{r plot-true-vs-observed}
+```{r plot-true-vs-observed-theta}
 library(ggplot2)
 ggplot() +
   geom_density(aes(x = mean_original, colour = 'estimated theta'), data = thdata) +
@@ -449,7 +453,7 @@ parameters {
   simplex[K] proportions;
   ordered[K] theta; ## means for each group
   real<lower=0> sigma; ## overall sigma; does not vary by group
-  positive_ordered[K] alpha;
+  vector<lower=0>[K] alpha;
 }
 
 model {
@@ -484,7 +488,7 @@ generated quantities {
 ### Fitting Dirichlet-prior model to data 
 
 Try fitting this revised model to our data. For now, start with K = 5 since that's the "ground truth"
-```{r}
+```{r, eval = T}
 stan_samples_dp <- stan(model_code = model_string_with_dp,
                      iter = iter,
                      data = list(y = restaurant$rescaled_value,
@@ -493,31 +497,44 @@ stan_samples_dp <- stan(model_code = model_string_with_dp,
                      model_name = 'Simple mixture model with Dirichlet prior (K = 5)'
                      )
 
-# summarize outcome of interest
 print(stan_samples_dp, pars = 'theta')
+
+## Note: increasing adapt_delta to see if this helps
+stan_samples_dp2 <- stan(model_code = model_string_with_dp,
+                     iter = iter,
+                     data = list(y = restaurant$rescaled_value,
+                                 n = nrow(restaurant),
+                                 K = 5),
+                     model_name = 'Simple mixture model with Dirichlet prior (K = 5)',
+                     control = list(adapt_delta = 0.9)
+                     )
+
+# summarize outcome of interest
+print(stan_samples_dp2, pars = 'theta')
+
+
+# Note: increasing max_treedepth to see if this helps 
+stan_samples_dp3 <- stan(model_code = model_string_with_dp,
+                     iter = iter,
+                     data = list(y = restaurant$rescaled_value,
+                                 n = nrow(restaurant),
+                                 K = 5),
+                     model_name = 'Simple mixture model with Dirichlet prior (K = 5)',
+                     control = list(adapt_delta = 0.9, max_treedepth = 15)
+                     )
+
+# summarize outcome of interest
+print(stan_samples_dp3, pars = 'theta')
 
 ```
 
 Before we go any further, it appears our Rhat values are pretty crappy (ie not close to 1).  Let's increase the number of iterations to see how this improves the model fit.
 
-```{r fit-model-with-dp}
-stan_samples_dp <- stan(model_code = model_string_with_dp,
-                     iter = iter*2,
-                     data = list(y = restaurant$rescaled_value,
-                                 n = nrow(restaurant),
-                                 K = 5),
-                     model_name = 'Simple mixture model with Dirichlet prior (K = 5)'
-                     )
-
-# summarize outcome of interest
-print(stan_samples_dp, pars = 'theta')
-```
-
 ### compare dp-derived model to the simple mixture model
 
-```{r compare-dp-to-simple-model}
+```{r compare-dp-to-simple-model, eval = T}
 
-loo_dp <- loo(extract(stan_samples_dp,'log_lik')$log_lik)
+loo_dp <- loo(rstan::extract(stan_samples_dp3,'log_lik')$log_lik)
 loo::compare(loo_dp, loo_k5)
 
 ```
