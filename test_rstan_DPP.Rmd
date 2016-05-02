@@ -1,0 +1,239 @@
+---
+output: 
+  pdf_document: 
+    fig_height: 4
+    fig_width: 12
+  md_document:
+    variant: markdown_github
+---
+
+```{r knitr_options, include=FALSE}
+library(knitr)
+opts_chunk$set(fig.width=12, 
+               fig.height=4,
+               fig.path='RmdFigs/',
+               warning=FALSE,
+               message=FALSE,
+               NULL)
+
+set.seed(1235)
+# install R packages if necessary:
+if (!require("gtools")) 
+  install.packages("gtools", repos="http://cran.rstudio.com")
+if (!require("purrr")) 
+  install.packages("purrr", repos="http://cran.rstudio.com")
+if (!require("rstan")) 
+  install.packages("rstan", repos="http://cran.rstudio.com")
+if (!require('loo'))
+  install.packages('loo', repos = 'http://cran.rstudio.com')
+if (!require('ggplot2'))
+  install.packages('ggplot2', repos = 'http://cran.rstudio.com')
+if (!require('shinystan'))
+  install.packages('shinystan', repos = 'http://cran.rstudio.com')
+if (!require('tidyr'))
+  install.packages('tidyr', repos = 'http://cran.rstudio.com')
+if (!require('stringr'))
+  install.packages('stringr', repos = 'http://cran.rstudio.com')
+
+library(purrr)
+library(rstan)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+```
+
+
+## Purpose
+
+We're going to try out a few simple models using Dirichlet-process priors, to see how they work in Stan.
+
+## Generating some fake data
+
+Here we're going to simulate some data according to the [Chinese Resaurant Process]. This is described in this [blog post](http://blog.datumbox.com/the-dirichlet-process-the-chinese-restaurant-process-and-other-representations/) by [Vasilis Vryniotis](http://blog.datumbox.com/author/bbriniotis/).
+
+```{r gen-data}
+
+## function to add a customer to a table
+add_customer <- function(thetas, alpha, base_function) {
+  
+  if (!exists('restaurant')) {
+    ## start with an empty restaurant
+    restaurant <<- data.frame(cust_id = integer(),
+                         table_id = integer(),
+                         theta = numeric(),
+                         #value = numeric(),
+                         NULL
+                         )
+    ## first customer sits at first table 
+    cust <- 1
+    table <- 1
+    theta <- base_function()
+  } else {
+    # subsequent customers sometimes sit at new tables, sometimes join existing tables 
+    num_prev_cust <- nrow(restaurant)
+    num_curr_tables <- max(restaurant$table_id)
+    cust <- num_prev_cust + 1
+    prob_sit_new_table <- alpha / (num_prev_cust + alpha)
+    sit_new_table <- rbinom(1,1,prob_sit_new_table)
+    
+    if (sit_new_table == 1) {
+      table <- num_curr_tables + 1
+      theta <- base_function()
+    }
+    else {
+      table_counts <- restaurant %>% 
+        group_by(table_id) %>%
+        summarize(prob = n()/(num_prev_cust + alpha)
+                  , theta = unique(theta)
+                  ) %>%
+        ungroup()
+      selected_table <- table_counts %>% dplyr::filter(rmultinom(1, 1, table_counts$prob) == 1)
+      table <- selected_table$table_id
+      theta <- selected_table$theta
+    }
+  }  
+    
+  restaurant <<- restaurant %>%
+    bind_rows(list(cust_id = cust, table_id = table, theta = theta))
+  return(TRUE)
+}
+
+# dispersion / parameter (alpha) - larger the value, more frequently new tables are spawned
+a <- 1
+
+## Base function used to generate new values of theta
+g_base <- purrr::partial(rnorm, n = 1, mean = 10, sd = 5)
+
+
+rm(restaurant)
+for (i in 1:100) {
+  add_customer(thetas = thetas, alpha = a, base_function = g_base)
+}
+
+## summarize
+restaurant %>% 
+  group_by(table_id) %>%
+  summarize(n = n(),
+            theta = unique(theta)
+            )
+
+```
+
+Next we add noise to our model, to simulate a more realistic data-generating process 
+
+```{r add-noise}
+
+noise_generator <- purrr::partial(rnorm, n = 1, mean = 0, sd = 1)
+
+restaurant <- restaurant %>%
+  rowwise() %>%
+  mutate(value = theta + noise_generator()) %>%
+  ungroup()
+
+ggplot(restaurant, aes(x = value, group = table_id, colour = factor(table_id))) + geom_density()
+
+```
+
+## Rescaling data 
+
+Now, let's simulate the data analysis process, which would typically rescale values prior to analysis.
+
+```{r rescale-data}
+restaurant <- restaurant %>%
+  mutate(global_mean = mean(value),
+         global_sd = sd(value),
+         rescaled_value = (value - global_mean)/global_sd
+         )
+
+ggplot(restaurant, aes(x = rescaled_value, group = table_id, colour = factor(table_id))) + geom_density()
+```
+
+## Defining the model
+
+This is a first pass at fitting this model using Stan, as if it were a simple mixture model.
+
+```{r model-code}
+
+model_string <- "
+data {
+  int n;
+  real y[n];
+  int K; ## presumed number of groups
+}
+
+parameters {
+  simplex[K] proportions;
+  real theta[K]; ## means for each group
+  real sigma; ## overall sigma; does not vary by group
+}
+
+model {
+  real ps[K]; ## temp holder for log component densities
+  
+  ## prior on thetas; normally distributed with mean 0 & sd 1
+  theta ~ normal(0, 1);
+
+  for (i in 1:n) {
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[n], theta[k], sigma);
+    }
+  }
+  increment_log_prob(log_sum_exp(ps));
+}
+
+"
+
+```
+
+Note that we've skipped the "generated quantities" block for now; means we won't be able to do PP checks or run loo.
+
+## Fitting the model in Stan
+
+```{r fit-model}
+stan_samples <- stan(model_code = model_string,
+                     iter = iter,
+                     data = list(y = restaurant$rescaled_value,
+                                 n = nrow(restaurant),
+                                 K = 5)
+                     )
+
+# summarize outcome of interest
+print(stan_samples, pars = 'theta')
+```
+
+## Evaluating model fit 
+
+### Review traceplot for theta - main parameter of interest 
+
+```{r eval-traceplot}
+traceplot(stan_samples, pars = 'theta')
+```
+
+### Review 50 & 95% posterior density for theta
+
+```{r eval-theta}
+plot(stan_samples, pars = 'theta')
+```
+
+### Comparing estimated theta to true values
+
+Next, since we are dealing with simulated data, we can compare the values of our estimated parameter (*theta*) to the true value used to generate the samples. 
+
+It's unlikely that the true value would be well outside our posterior distribution for theta, but it's possible.
+
+```{r summarize-theta}
+
+thetahat <- unlist(rstan::extract(stan_samples, 'theta')$theta)
+
+rownames(thetahat) <- seq(from = 1, to = nrow(thetahat), by = 1)
+colnames(thetahat) <- seq(from = 1, to = 5, by = 1)
+thdata <- as.data.frame(thetahat) %>%
+  mutate(iter = n()) %>%
+  tidyr::gather(sample, mean, 1:5, convert = T)
+  
+library(ggplot2)
+ggplot() +
+  geom_density(aes(x = mean, group = sample, colour = 'estimated theta'), data = thdata) +
+  geom_vline(aes(xintercept = mean, colour = 'true theta values'), data = restaurant %>% group_by(table_id) %>% summarize(mean = mean(rescaled_value, na.rm = T)) %>% ungroup())
+```
+
