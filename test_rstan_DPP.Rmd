@@ -36,6 +36,8 @@ if (!require('tidyr'))
   install.packages('tidyr', repos = 'http://cran.rstudio.com')
 if (!require('stringr'))
   install.packages('stringr', repos = 'http://cran.rstudio.com')
+if (!require('parallel'))
+  install.packages('parallel', repos = 'http://cran.rstudio.com')
 
 library(purrr)
 library(rstan)
@@ -43,6 +45,7 @@ library(ggplot2)
 library(stringr)
 library(tidyr)
 library(dplyr)
+options(mc.cores = max(parallel::detectCores(),4))
 ```
 
 
@@ -197,8 +200,10 @@ Note that we've skipped the "generated quantities" block for now; means we won't
 
 ```{r fit-model}
 iter <- 500
+seed <- 1235
 stan_samples <- stan(model_code = model_string,
                      iter = iter,
+                     seed = seed,
                      data = list(y = restaurant$rescaled_value,
                                  n = nrow(restaurant),
                                  K = 5),
@@ -235,7 +240,6 @@ First we do some data-prep to collect & transform the values of theta toput them
 
 ## true values, on original scale
 true_thetas <- unique(restaurant$theta)
-true_thetas <- true_thetas[order(true_thetas)]
 
 ## save, so we can transform thetahat to original scale
 global_mean <- unique(restaurant$global_mean)
@@ -292,7 +296,7 @@ Let's see if Loo can help us distinguish between different values of K.
 
 In this case, we will use Loo for sanity checking & to compare model fit under different values of K.
 
-### Writing the generated quantities block
+### Adding the generated quantities block
 
 In order to use Loo, we need to first calculate the log_liklihood in the generated quantities block.
 
@@ -345,6 +349,7 @@ Let's do a quick sanity check to see if the model works as it did before.
 ```{r sanity-check-post-log-lik}
 stan_samples_k5 <- stan(model_code = model_string_with_loglik,
                      iter = iter,
+                     seed = seed,
                      data = list(y = restaurant$rescaled_value,
                                  n = nrow(restaurant),
                                  K = 5),
@@ -361,7 +366,7 @@ print(stan_samples_k5, pars = 'theta')
 loo_k5 <- loo(rstan::extract(stan_samples_k5, 'log_lik')$log_lik)
 ```
 
-### Estimating model with k = 3,4 and 5
+### Estimating model with k = 3, 4, and 5
 
 (note: output is hidden for sake of brevity)
 
@@ -369,6 +374,7 @@ loo_k5 <- loo(rstan::extract(stan_samples_k5, 'log_lik')$log_lik)
 ## K = 2
 stan_samples_k2 <- stan(model_code = model_string_with_loglik,
                      iter = iter,
+                     seed = seed,
                      data = list(y = restaurant$rescaled_value,
                                  n = nrow(restaurant),
                                  K = 2),
@@ -381,6 +387,7 @@ loo_k2 <- loo(rstan::extract(stan_samples_k2, 'log_lik')$log_lik)
 ## K = 3
 stan_samples_k3 <- stan(model_code = model_string_with_loglik,
                      iter = iter,
+                     seed = seed,
                      data = list(y = restaurant$rescaled_value,
                                  n = nrow(restaurant),
                                  K = 3),
@@ -393,6 +400,7 @@ loo_k3 <- loo(rstan::extract(stan_samples_k3, 'log_lik')$log_lik)
 ## K = 4
 stan_samples_k4 <- stan(model_code = model_string_with_loglik,
                      iter = iter,
+                     seed = seed,
                      data = list(y = restaurant$rescaled_value,
                                  n = nrow(restaurant),
                                  K = 4),
@@ -407,7 +415,7 @@ loo_k4 <- loo(rstan::extract(stan_samples_k4, 'log_lik')$log_lik)
 
 ### Comparing model fit using Loo
 
-Note that higher values of elpd_loo are better -- so the first model (loo_k4) listed here is likely the "best"" fit.
+Note that higher values of elpd_loo are better -- so the first model listed here is likely the "best" fit.
 
 ```{r compare-model-fit-loo}
 loo::compare(loo_k2, loo_k3, loo_k4, loo_k5)
@@ -437,11 +445,11 @@ Based on these results, the best fits have K = 3 or K = 4. Ideal result will lik
 
 ## Improving the model using Dirichlet prior 
 
-Now that we have a reasonably-well-fitting mixture model, let's see how this can be improved by incorporating a Dirichlet prior.
+Now that we have a reasonably-well-fitting mixture model, let's see how this can be improved by incorporating a Dirichlet (process) prior. This is not a pure non-parametric implementation, since we are specifying the max possible number of groups (K) but it should get us close.
 
 Since our data were generated according to a dirichlet process (at least we think they were!), it's plausible that this prior may yield a distribution of group sizes that better match our data.
 
-```{r model-definition-with-DPP}
+```{r define-dp-model-with-DPP}
 model_string_with_dp <- "
 data {
   int n;
@@ -450,18 +458,26 @@ data {
 }
 
 parameters {
-  simplex[K] proportions;
-  ordered[K] theta; ## means for each group
-  real<lower=0> sigma; ## overall sigma; does not vary by group
+  simplex[K] proportions;  ## mixing proportion (pis)
+  ordered[K] theta;        ## means for each group
+  real<lower=0> sigma;     ## overall sigma; does not vary by group
+  real<lower=0> a;         ## concentration parameter
+}
+
+transformed parameters {
   vector<lower=0>[K] alpha;
+  for (k in 1:K) {
+    alpha[k] <- a/k;
+  }
 }
 
 model {
-  ## prior on thetas; normally distributed with mean 0 and sd 1
+  ## priors on parameters
   theta ~ normal(0, 1);
+  a ~ normal(10,10);
   proportions ~ dirichlet(alpha);
   
-  ## for now, no prior on proportions. Should prob be a dirichlet prior
+  ## compute likelihood for each observation, integrating out discrete-ness of groups
   for (i in 1:n) {
     real ps[K]; ## temp holder for log component densities
     for (k in 1:K) {
@@ -488,54 +504,608 @@ generated quantities {
 ### Fitting Dirichlet-prior model to data 
 
 Try fitting this revised model to our data. For now, start with K = 5 since that's the "ground truth"
-```{r, eval = T}
+
+```{r fit-dp-model-k5, eval = T}
 stan_samples_dp <- stan(model_code = model_string_with_dp,
-                     iter = iter,
+                     iter = iter*2,
+                     seed = seed,
                      data = list(y = restaurant$rescaled_value,
                                  n = nrow(restaurant),
                                  K = 5),
+                     control = list(adapt_delta = 0.95, max_treedepth = 13),
                      model_name = 'Simple mixture model with Dirichlet prior (K = 5)'
                      )
 
-print(stan_samples_dp, pars = 'theta')
-
-## Note: increasing adapt_delta to see if this helps
-stan_samples_dp2 <- stan(model_code = model_string_with_dp,
-                     iter = iter,
-                     data = list(y = restaurant$rescaled_value,
-                                 n = nrow(restaurant),
-                                 K = 5),
-                     model_name = 'Simple mixture model with Dirichlet prior (K = 5)',
-                     control = list(adapt_delta = 0.9)
-                     )
-
-# summarize outcome of interest
-print(stan_samples_dp2, pars = 'theta')
-
-
-# Note: increasing max_treedepth to see if this helps 
-stan_samples_dp3 <- stan(model_code = model_string_with_dp,
-                     iter = iter,
-                     data = list(y = restaurant$rescaled_value,
-                                 n = nrow(restaurant),
-                                 K = 5),
-                     model_name = 'Simple mixture model with Dirichlet prior (K = 5)',
-                     control = list(adapt_delta = 0.9, max_treedepth = 15)
-                     )
-
-# summarize outcome of interest
-print(stan_samples_dp3, pars = 'theta')
+## look at thetas
+print(stan_samples_dp, pars = c('theta'))
 
 ```
 
-Before we go any further, it appears our Rhat values are pretty crappy (ie not close to 1).  Let's increase the number of iterations to see how this improves the model fit.
+Here I should mention that we increased the number of iterations, and increased the values of adapt_delta & max_treedepth. These settings were determined through trial and error.
 
 ### compare dp-derived model to the simple mixture model
 
+Comparing the two models using *loo* yields some differences in overall predictive accuracy. The simple mixture model does appear to fit these data better than the DP process. 
+
 ```{r compare-dp-to-simple-model, eval = T}
 
-loo_dp <- loo(rstan::extract(stan_samples_dp3,'log_lik')$log_lik)
-loo::compare(loo_dp, loo_k5)
+loo_dp <- loo(rstan::extract(stan_samples_dp,'log_lik')$log_lik)
+loo::compare(loo_dp, loo_k4, loo_k5)
+
+loo::compare(loo_dp, loo_k4)
 
 ```
+
+Let's see what happens with the DP model if we increase the number of groups to, say, K = 10.
+
+```{r fit-dp-model-k10, eval = T}
+stan_samples_dp_k10 <- stan(model_code = model_string_with_dp,
+                     iter = iter*2,
+                     seed = seed,
+                     data = list(y = restaurant$rescaled_value,
+                                 n = nrow(restaurant),
+                                 K = 10),
+                     control = list(adapt_delta = 0.95, max_treedepth = 13),
+                     model_name = 'Simple mixture model with Dirichlet prior'
+                     )
+
+print(stan_samples_dp_k10, pars = c('theta'))
+
+```
+
+In this case, we're a lot less interested in what happens to the thetas than the proportions.
+
+```{r dp-model-proportions}
+print(stan_samples_dp_k10, pars = c('theta'))
+```
+
+And, let's compare the combination of proportion & theta to our original data.
+
+```{r compare-dp-estimates-theta}
+## weighted distribution of true values of theta
+true_theta <- 
+  restaurant %>%
+  mutate(theta_scaled = (theta - global_mean)/global_sd) 
+
+## weighted distribution of estimated values of theta from DP model
+estimated_theta_dp <- 
+  rstan::extract(stan_samples_dp_k10,'theta')$theta %>%
+  as.data.frame(.)
+names(estimated_theta_dp) <- 1:10
+estimated_theta_dp <- 
+  estimated_theta_dp %>%
+  mutate(iter = 1:n()) %>%
+  gather(cluster_id, theta_scaled, 1:10, convert = T) 
+
+estimated_prop_dp <- 
+  rstan::extract(stan_samples_dp_k10, 'proportions')$proportions %>%
+  as.data.frame(.)
+names(estimated_prop_dp) <- 1:10
+estimated_prop_dp <- 
+  estimated_prop_dp %>%
+  mutate(iter = 1:n()) %>%
+  gather(cluster_id, prop, 1:10, convert = T)
+
+estimated_dp <- 
+  estimated_theta_dp %>%
+  inner_join(estimated_prop_dp
+             , by = c('cluster_id','iter')
+             )
+
+ggplot() +
+  geom_density(data = true_theta
+               , mapping = aes(x = theta_scaled)
+               , colour = 'lightgrey'
+               , fill = 'lightgrey'
+               , alpha = 0.5
+               ) +
+  geom_density_2d(data = estimated_dp, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
+  theme_bw()
+```
+
+Let's compare this to the same computation using the simple mixture model with K = 4
+
+```{r compare-dp-k4-estimates-thetas}
+
+## weighted distribution of estimated values of theta from (k4) mixture model
+estimated_theta_mix <- 
+  rstan::extract(stan_samples_k4,'theta')$theta %>%
+  as.data.frame(.)
+names(estimated_theta_mix) <- 1:4
+estimated_theta_mix <- 
+  estimated_theta_mix %>%
+  mutate(iter = 1:n()) %>%
+  gather(cluster_id, theta_scaled, 1:4, convert = T) 
+
+estimated_prop_mix <- 
+  rstan::extract(stan_samples_k4, 'proportions')$proportions %>%
+  as.data.frame(.)
+names(estimated_prop_mix) <- 1:4
+estimated_prop_mix <- 
+  estimated_prop_mix %>%
+  mutate(iter = 1:n()) %>%
+  gather(cluster_id, prop, 1:4, convert = T)
+
+estimated_mix <- 
+  estimated_theta_mix %>%
+  inner_join(estimated_prop_mix
+             , by = c('cluster_id','iter')
+             )
+
+ggplot() +
+  geom_density(data = true_theta
+               , mapping = aes(x = theta_scaled)
+               , colour = 'lightgrey'
+               , fill = 'lightgrey'
+               , alpha = 0.5
+               ) +
+  geom_density_2d(data = estimated_dp, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
+  geom_density_2d(data = estimated_mix, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - k4 mixture model')) +
+  theme_bw()
+```
+
+My guess is, the reason why we're seeing this vestigial cluster at theta = 0 is due to our prior -- this is set to be gaussian with mean 0  and sd of 1. 
+
+Let's try relaxing this prior to place less bias on the 0-valued thetas.
+
+## Improving the model by adjusting the priors on theta
+
+While we're at it, let's make a second modification to our model since there is an additional constraint that may not be necessary (or tenable)..
+
+Namely, the original mixture model forced the thetas to be "ordered" -- without this constraint all clusters would be exchangeable & so we'd have too much class switching (we still have class switching but less of it). 
+
+In this model, forcing the *means* to be ordered is problematic because we have additionally imposed some order on the *size* of each cluster, via the prior on the proportions parameter. There is no reason to think that the largest clusters will also have the smallest means, and so we should now relax one of these two constraints.
+
+Thus, to summarize, we will make two modifications to our model based on the observations above -- 
+ 1. allow priors on theta to be passed in as parameters 
+ 2. remove *ordered* parameter on the thetas - make this simply be a vector. 
+
+Let's see how well this revised model fits our data.
+
+```{r define-dp2-DPP-mod-theta-prior}
+model_string_with_dp2 <- "
+data {
+  int n;
+  real y[n];
+  int K; ## presumed number of groups
+  real prior_theta_mean;
+  real prior_theta_sd;
+}
+
+parameters {
+  simplex[K] proportions;  ## mixing proportion (pis)
+  vector[K] theta;           ## means for each group
+  real<lower=0> sigma;     ## overall sigma; does not vary by group
+  real<lower=0> a;         ## concentration parameter
+}
+
+transformed parameters {
+  vector<lower=0>[K] alpha;
+  for (k in 1:K) {
+    alpha[k] <- a/k;
+  }
+}
+
+model {
+  ## priors on parameters
+  theta ~ normal(prior_theta_mean, prior_theta_sd);
+  a ~ normal(10, 10);
+  proportions ~ dirichlet(alpha);
+  
+  ## compute likelihood for each observation, integrating out discrete-ness of groups
+  for (i in 1:n) {
+    real ps[K]; ## temp holder for log component densities
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
+    }
+    increment_log_prob(log_sum_exp(ps));
+  }
+}
+
+generated quantities {
+  real log_lik[n];
+  
+  for (i in 1:n) {
+    real ps[K]; ## temp holder for log component densities
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
+    }
+    log_lik[i] <- log_sum_exp(ps);
+  }
+}
+"
+```
+
+### Fitting adustable-prior model to data 
+
+Try fitting this revised model to our data. For now, start with K = 10 since that's what we did previously. We will increase the prior_theta_sd to 5 to give this some more breathing room (recall that our data are rescaled so 5 is quite large!).
+
+```{r fit-dp2-model, eval = T}
+stan_samples_dp2 <- stan(model_code = model_string_with_dp2
+                         , iter = iter*2
+                         , seed = seed
+                         , data = list(y = restaurant$rescaled_value
+                                       , n = nrow(restaurant)
+                                       , K = 10
+                                       , prior_theta_mean = 0
+                                       , prior_theta_sd = 5
+                                       )
+                         , control = list(adapt_delta = 0.98, max_treedepth = 15)
+                         , model_name = 'Simple mixture model with Dirichlet prior'
+                         )
+
+## look at thetas
+print(stan_samples_dp2, pars = c('theta'))
+
+```
+
+Note also that we have increased the adapt delta & max_treedepth yet again, based on repeated runs of this model.
+
+### Comparing estimated thetas to known truth
+
+Now let's compare the distribution of thetas from this revised model to the ground truth.
+
+(we're also going to re-write this into a function since it's likely we'll be using it again.)
+
+```{r compare-dp2-estimates-theta}
+
+get_sampled_parameter <- function(stanfit, pars, parameter_id = 'parameter_id', parameter_value = 'parameter_value') {
+  estimated_pars <- 
+    rstan::extract(object = stanfit, pars = pars)[[1]] %>%
+    as.data.frame(.)
+  
+  names(estimated_pars) <- seq_len(ncol(estimated_pars))
+  
+  vars_to_rename <- list('parameter_id', 'parameter_value')
+  names(vars_to_rename) <- c(parameter_id, parameter_value)
+  
+  estimated_pars %>%
+    mutate(iter = 1:n()) %>%
+    gather(parameter_id, parameter_value, -iter, convert = T) %>%
+    rename_(.dots = vars_to_rename)
+}
+
+estimated_prop_dp2 <- get_sampled_parameter(stan_samples_dp2, 'proportions', parameter_id = 'cluster_id', parameter_value = 'prop')
+estimated_theta_dp2 <- get_sampled_parameter(stan_samples_dp2, 'theta', parameter_id = 'cluster_id', parameter_value = 'theta_scaled')
+
+estimated_dp2 <- 
+  estimated_theta_dp2 %>%
+  inner_join(estimated_prop_dp2
+             , by = c('cluster_id','iter')
+             )
+
+ggplot() +
+  geom_density(data = true_theta
+               , mapping = aes(x = theta_scaled)
+               , colour = 'lightgrey'
+               , fill = 'lightgrey'
+               , alpha = 0.5
+               ) +
+  geom_density_2d(data = estimated_dp2, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
+  theme_bw()
+```
+
+Hmm.. Its pretty obvious that the priors on theta are way too strong, even though the clusters have minimal size.
+
+It also seems like we want to have an even more strongly diminishing likelihood of new clusters - maybe put a stronger prior on the `{r, eval = F} a` parameter.
+
+## Improving the model by adjusting priors on a and theta
+
+Now we're going to modify the model again by removing priors on theta & modifying the prior on a to be stronger.
+
+Recall that we set `{r eval = F} a` to `{r eval = T} a` initially. How close is this to our estimate?
+
+```{r compare-dp2-estimates-a}
+
+print(stan_samples_dp2, pars = 'a')
+
+estimated_a_dp2 <- get_sampled_parameter(stan_samples_dp2, 'a')
+ggplot() +
+  geom_density(data = estimated_a_dp2, aes(x = log1p(parameter_value), colour = 'estimated values')) + 
+  geom_vline(aes(xintercept = log1p(a), colour = 'true value'))
+```
+
+Nice - this seems to be a reasonable estimate. 
+
+Let's write a revised version of this model, so that we can modify the priors on a.
+
+```{r define-dp3-DPP-mod-a-prior}
+model_string_with_dp3 <- "
+data {
+  int n;
+  real y[n];
+  int K; ## presumed number of groups
+  real prior_theta_mean;
+  real prior_theta_sd;
+  real prior_a_mean;
+  real prior_a_sd;
+}
+
+parameters {
+  simplex[K] proportions;  ## mixing proportion (pis)
+  vector[K] theta;           ## means for each group
+  real<lower=0> sigma;     ## overall sigma; does not vary by group
+  real<lower=0> a;         ## concentration parameter
+}
+
+transformed parameters {
+  vector<lower=0>[K] alpha;
+  for (k in 1:K) {
+    alpha[k] <- a/k;
+  }
+}
+
+model {
+  ## priors on parameters
+  theta ~ normal(prior_theta_mean, prior_theta_sd);
+  a ~ normal(prior_a_mean, prior_a_sd);
+  proportions ~ dirichlet(alpha);
+  
+  ## compute likelihood for each observation, integrating out discrete-ness of groups
+  for (i in 1:n) {
+    real ps[K]; ## temp holder for log component densities
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
+    }
+    increment_log_prob(log_sum_exp(ps));
+  }
+}
+
+generated quantities {
+  real log_lik[n];
+  
+  for (i in 1:n) {
+    real ps[K]; ## temp holder for log component densities
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
+    }
+    log_lik[i] <- log_sum_exp(ps);
+  }
+}
+"
+```
+
+### Fitting revised model
+
+```{r fit-dp3-model, eval = T}
+stan_samples_dp3 <- stan(model_code = model_string_with_dp3
+                         , iter = iter*2
+                         , seed = seed
+                         , data = list(y = restaurant$rescaled_value
+                                       , n = nrow(restaurant)
+                                       , K = 10
+                                       , prior_theta_mean = 0
+                                       , prior_theta_sd = 1
+                                       , prior_a_mean = 0
+                                       , prior_a_sd = 1
+                                       )
+                         , control = list(adapt_delta = 0.98, max_treedepth = 15)
+                         , model_name = 'Simple mixture model with Dirichlet prior'
+                         )
+
+## look at thetas
+print(stan_samples_dp3, pars = c('theta','a'))
+
+```
+
+### comparing estimates of theta to known values 
+
+Now, repeating the process above, we look at similarity of thetas to known values (weighted by proportion)
+
+```{r compare-dp3-estimates-theta}
+
+estimated_prop_dp3 <- get_sampled_parameter(stan_samples_dp3, 'proportions', parameter_id = 'cluster_id', parameter_value = 'prop')
+estimated_theta_dp3 <- get_sampled_parameter(stan_samples_dp3, 'theta', parameter_id = 'cluster_id', parameter_value = 'theta_scaled')
+
+estimated_dp3 <- 
+  estimated_theta_dp3 %>%
+  inner_join(estimated_prop_dp3
+             , by = c('cluster_id','iter')
+             )
+
+ggplot() +
+  geom_density(data = true_theta
+               , mapping = aes(x = theta_scaled)
+               , colour = 'lightgrey'
+               , fill = 'lightgrey'
+               , alpha = 0.5
+               ) +
+  geom_density_2d(data = estimated_dp3, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
+  theme_bw()
+```
+
+### comparing estimates of a to known value
+
+And, look again at the distribution of values of a.
+
+```{r compare-dp3-estimates-a}
+
+estimated_a_dp3 <- get_sampled_parameter(stan_samples_dp3, 'a')
+ggplot() +
+  geom_density(data = estimated_a_dp3, aes(x = log1p(parameter_value), colour = 'estimated values')) + 
+  geom_vline(aes(xintercept = log1p(a), colour = 'true value'))
+```
+
+In general, it seems like we have too little data & thus our estimates are heavily influenced by our priors.
+
+### Comparing this model's performance to the k4 model
+
+```{r compare-dp3-to-k4}
+loo_dp3 <- loo(rstan::extract(stan_samples_dp3, 'log_lik')$log_lik)
+loo::compare(loo_dp3, loo_k4)
+```
+
+At this point, the k4 model is only marginally better than this "dp3" model.
+
+Just for kicks, let's try a uniform prior on the thetas to see how this model does.
+
+## Model with uniform prior on thetas
+
+Now we're going to try a similar model but remove the prior on the thetas to be basically non-informative.
+
+For sake of sampling efficiency, we will want to bound the values of theta so that the sampler doesn't have to explore the entire sample space -- without a prior, values as large as 1000 as just as plausible as those close to 0. 
+
+This is not an optimal approach in general, but in our case isn't terrible since we will be applying these data to a constrained [0,1] sample space in practice. 
+
+Here is the revised model code:
+
+```{r model-definition-dp4-no-theta-prior}
+model_string_with_dp4 <- "
+data {
+  int n;
+  real y[n];
+  int K; ## presumed number of groups
+  real prior_a_mean;
+  real prior_a_sd;
+}
+
+parameters {
+  simplex[K] proportions;  ## mixing proportion (pis)
+  vector<lower=-10,upper=10>[K] theta;           ## means for each group
+  real<lower=0> sigma;     ## overall sigma; does not vary by group
+  real<lower=0> a;         ## concentration parameter
+}
+
+transformed parameters {
+  vector<lower=0>[K] alpha;
+  for (k in 1:K) {
+    alpha[k] <- a/k;
+  }
+}
+
+model {
+  ## priors on parameters
+  a ~ normal(prior_a_mean, prior_a_sd);
+  proportions ~ dirichlet(alpha);
+  
+  ## compute likelihood for each observation, integrating out discrete-ness of groups
+  for (i in 1:n) {
+    real ps[K]; ## temp holder for log component densities
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
+    }
+    increment_log_prob(log_sum_exp(ps));
+  }
+}
+
+generated quantities {
+  real log_lik[n];
+  
+  for (i in 1:n) {
+    real ps[K]; ## temp holder for log component densities
+    for (k in 1:K) {
+      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
+    }
+    log_lik[i] <- log_sum_exp(ps);
+  }
+}
+"
+```
+
+### Fitting revised model
+
+Next we fit this model to data, leaving most of the parameters as before.
+
+```{r fit-dp4-model, eval = T}
+stan_samples_dp4 <- stan(model_code = model_string_with_dp4
+                         , iter = iter*2
+                         , seed = seed
+                         , data = list(y = restaurant$rescaled_value
+                                       , n = nrow(restaurant)
+                                       , K = 10
+                                       , prior_a_mean = 0
+                                       , prior_a_sd = 1
+                                       )
+                         , control = list(adapt_delta = 0.98, max_treedepth = 15)
+                         , model_name = 'Simple mixture model with Dirichlet prior'
+                         )
+
+## look at thetas
+print(stan_samples_dp4, pars = c('theta','a'))
+
+```
+
+### comparing estimates of theta to known values 
+
+Finally, we repeat the process above once again to look at similarity of thetas to known values (weighted by proportion)
+
+```{r compare-dp4-estimates-theta}
+
+estimated_prop_dp4 <- get_sampled_parameter(stan_samples_dp4, 'proportions', parameter_id = 'cluster_id', parameter_value = 'prop')
+estimated_theta_dp4 <- get_sampled_parameter(stan_samples_dp4, 'theta', parameter_id = 'cluster_id', parameter_value = 'theta_scaled')
+
+estimated_dp4 <- 
+  estimated_theta_dp4 %>%
+  inner_join(estimated_prop_dp4
+             , by = c('cluster_id','iter')
+             )
+
+ggplot() +
+  geom_density(data = true_theta
+               , mapping = aes(x = theta_scaled)
+               , colour = 'lightgrey'
+               , fill = 'lightgrey'
+               , alpha = 0.5
+               ) +
+  geom_density_2d(data = estimated_dp4, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
+  theme_bw()
+```
+
+Appears that even a uniform prior on the thetas is "informative".
+
+### comparing estimates of a to known value
+
+Let's see how this modifies the estimates of values of a.
+
+```{r compare-dp4-estimates-a}
+
+estimated_a_dp4 <- get_sampled_parameter(stan_samples_dp4, 'a')
+ggplot() +
+  geom_density(data = estimated_a_dp4, aes(x = log1p(parameter_value), colour = 'estimated values')) + 
+  geom_vline(aes(xintercept = log1p(a), colour = 'true value'))
+```
+
+Interesting that this model seems to perform much more poorly than that with a more informative prior on thetas.
+
+### Comparing this model's performance to the k4 model
+
+Let's see how this impacts our "loo" estimates.
+
+```{r compare-dp4-to-k4}
+loo_dp4 <- loo(rstan::extract(stan_samples_dp4, 'log_lik')$log_lik)
+loo::compare(loo_dp4, loo_k4)
+```
+
+Definitely worse than the K4 model.
+
+Is it measureably worse than the dp3 model?
+
+```{r compare-dp4-to-dp3}
+loo::compare(loo_dp4, loo_dp3)
+```
+
+Pretty much.
+
+## Summarizing what we've learned
+
+At this point we've implemented several iterations of two models to fit some data generated via a Chinese Resaurant Process 
+
+These models are (broadly):
+1. a simple mixture model (MM)
+2. a semi-parametric mixture model with Dirichlet Process (DP) priors
+
+Observations :
+1. For these data (with sample size of `{r} nrow(restaurant)`), the MM and DP models fit our data +/- equally as well.
+ * We don't yet know if the difference will be more apparent at different (ie larger) sample sizes
+2. In the DP model, we end up proposing many more clusters than we expect will exist, leaving vestigial groups 
+ * May consider a penalized likelihood so that the model prefers a smaller number of groups, all things being equal
+3. Most remaining issues are common to both models:
+ * Relatively strong influence of priors on the result
+ * Label-switching among clusters; this is still a problem although minimized by parameterization
+
+Next steps:
+1. Re-run analysis with a larger sample size (10k instead of 100)
+2. Look at implementation of TSSB , instead of DP
+
+
 
