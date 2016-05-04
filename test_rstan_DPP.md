@@ -187,7 +187,7 @@ Fitting the model in Stan
     ## theta[4]  0.25    0.03 0.42 -0.22 -0.06  0.11  0.48  1.39   148 1.02
     ## theta[5]  1.60    0.00 0.13  1.33  1.52  1.60  1.68  1.84   758 1.01
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:49:39 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 23:00:40 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -356,7 +356,7 @@ before.
     ## theta[4]  0.25    0.03 0.42 -0.22 -0.06  0.11  0.48  1.39   148 1.02
     ## theta[5]  1.60    0.00 0.13  1.33  1.52  1.60  1.68  1.84   758 1.01
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:50:38 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 23:01:33 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -540,7 +540,7 @@ since that's the "ground truth"
     ## theta[4]  0.50    0.03 0.52 -0.23  0.07  0.45  0.85  1.56   254 1.02
     ## theta[5]  1.48    0.15 0.35  0.53  1.40  1.55  1.66  2.01     5 1.23
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:52:08 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 23:02:56 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -599,7 +599,7 @@ groups to, say, K = 10.
     ## theta[9]   1.23    0.02 0.42  0.29  0.94  1.35  1.56  1.83   649 1.00
     ## theta[10]  1.76    0.01 0.30  1.43  1.60  1.68  1.81  2.62  1006 1.00
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:53:24 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 23:04:09 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -625,7 +625,7 @@ than the proportions.
     ## theta[9]   1.23    0.02 0.42  0.29  0.94  1.35  1.56  1.83   649 1.00
     ## theta[10]  1.76    0.01 0.30  1.43  1.60  1.68  1.81  2.62  1006 1.00
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:53:24 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 23:04:09 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -843,7 +843,7 @@ our data are rescaled so 5 is quite large!).
     ## theta[9]  -0.36    0.16 3.14 -7.24 -1.68 -0.29  1.39  6.73   380 1.01
     ## theta[10] -0.46    0.20 3.62 -8.31 -3.03 -0.36  1.53  8.19   341 1.01
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:55:30 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 23:06:10 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -920,7 +920,7 @@ close is this to our estimate?
     ##   mean se_mean   sd 2.5%  25% 50%   75% 97.5% n_eff Rhat
     ## a 8.73    1.02 7.14 0.54 2.75 6.9 13.11 25.71    49 1.07
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:55:30 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 23:06:10 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -1028,7 +1028,7 @@ priors on a.
     ## theta[10] -0.35    0.15 1.39 -3.36 -1.07 -0.18 0.58  1.84    82 1.03
     ## a          1.40    0.03 0.61  0.47  0.95  1.32 1.78  2.78   372 1.00
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:57:04 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 23:07:38 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -1192,7 +1192,7 @@ before.
     ## theta[10] -0.29    0.20 5.08 -9.32 -3.68 -0.42 3.15  9.29   661 1.00
     ## a          0.85    0.04 0.48  0.19  0.51  0.76 1.11  1.97   132 1.04
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 19:03:44 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 23:14:10 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
