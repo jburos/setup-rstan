@@ -187,7 +187,7 @@ Fitting the model in Stan
     ## theta[4]  0.25    0.03 0.42 -0.22 -0.06  0.11  0.48  1.39   148 1.02
     ## theta[5]  1.60    0.00 0.13  1.33  1.52  1.60  1.68  1.84   758 1.01
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 14:27:02 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:49:39 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -356,7 +356,7 @@ before.
     ## theta[4]  0.25    0.03 0.42 -0.22 -0.06  0.11  0.48  1.39   148 1.02
     ## theta[5]  1.60    0.00 0.13  1.33  1.52  1.60  1.68  1.84   758 1.01
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 14:27:51 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:50:38 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -540,7 +540,7 @@ since that's the "ground truth"
     ## theta[4]  0.50    0.03 0.52 -0.23  0.07  0.45  0.85  1.56   254 1.02
     ## theta[5]  1.48    0.15 0.35  0.53  1.40  1.55  1.66  2.01     5 1.23
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 14:29:08 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:52:08 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -599,7 +599,7 @@ groups to, say, K = 10.
     ## theta[9]   1.23    0.02 0.42  0.29  0.94  1.35  1.56  1.83   649 1.00
     ## theta[10]  1.76    0.01 0.30  1.43  1.60  1.68  1.81  2.62  1006 1.00
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 14:30:15 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:53:24 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -625,7 +625,7 @@ than the proportions.
     ## theta[9]   1.23    0.02 0.42  0.29  0.94  1.35  1.56  1.83   649 1.00
     ## theta[10]  1.76    0.01 0.30  1.43  1.60  1.68  1.81  2.62  1006 1.00
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 14:30:15 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:53:24 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -636,7 +636,14 @@ data.
     ## weighted distribution of true values of theta
     true_theta <- 
       restaurant %>%
-      mutate(theta_scaled = (theta - global_mean)/global_sd) 
+      mutate(theta_scaled = (theta - global_mean)/global_sd
+             , global_n = n()
+             ) %>%
+      group_by(table_id) %>%
+      summarize(theta_scaled = unique(theta_scaled)
+                , prop = unique(n()/global_n)
+                ) %>%
+      ungroup()
 
     ## weighted distribution of estimated values of theta from DP model
     estimated_theta_dp <- 
@@ -664,13 +671,12 @@ data.
                  )
 
     ggplot() +
-      geom_density(data = true_theta
-                   , mapping = aes(x = theta_scaled)
-                   , colour = 'lightgrey'
-                   , fill = 'lightgrey'
-                   , alpha = 0.5
-                   ) +
-      geom_density_2d(data = estimated_dp, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
+      geom_point(data = true_theta
+                 , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+                 ) +
+      geom_density_2d(data = estimated_dp, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model', fill = 'estimated - DP model')) + 
+      scale_fill_discrete(guide = "none") +
+      scale_size_continuous(guide = "none") +
       theme_bw()
 
 ![](RmdFigs/compare-dp-estimates-theta-1.png)<!-- -->
@@ -704,14 +710,13 @@ model with K = 4
                  )
 
     ggplot() +
-      geom_density(data = true_theta
-                   , mapping = aes(x = theta_scaled)
-                   , colour = 'lightgrey'
-                   , fill = 'lightgrey'
-                   , alpha = 0.5
-                   ) +
+      geom_point(data = true_theta
+                 , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+                 ) +
       geom_density_2d(data = estimated_dp, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
       geom_density_2d(data = estimated_mix, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - k4 mixture model')) +
+      scale_fill_discrete(guide = "none") +
+      scale_size_continuous(guide = "none") +
       theme_bw()
 
 ![](RmdFigs/compare-dp-k4-estimates-thetas-1.png)<!-- -->
@@ -838,7 +843,7 @@ our data are rescaled so 5 is quite large!).
     ## theta[9]  -0.36    0.16 3.14 -7.24 -1.68 -0.29  1.39  6.73   380 1.01
     ## theta[10] -0.46    0.20 3.62 -8.31 -3.03 -0.36  1.53  8.19   341 1.01
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 14:32:18 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:55:30 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -880,12 +885,11 @@ we'll be using it again.)
                  )
 
     ggplot() +
-      geom_density(data = true_theta
-                   , mapping = aes(x = theta_scaled)
-                   , colour = 'lightgrey'
-                   , fill = 'lightgrey'
-                   , alpha = 0.5
-                   ) +
+      geom_point(data = true_theta
+                 , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+                 ) +
+      scale_fill_discrete(guide = "none") +
+      scale_size_continuous(guide = "none") +
       geom_density_2d(data = estimated_dp2, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
       theme_bw()
 
@@ -916,7 +920,7 @@ close is this to our estimate?
     ##   mean se_mean   sd 2.5%  25% 50%   75% 97.5% n_eff Rhat
     ## a 8.73    1.02 7.14 0.54 2.75 6.9 13.11 25.71    49 1.07
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 14:32:18 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:55:30 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -1024,7 +1028,7 @@ priors on a.
     ## theta[10] -0.35    0.15 1.39 -3.36 -1.07 -0.18 0.58  1.84    82 1.03
     ## a          1.40    0.03 0.61  0.47  0.95  1.32 1.78  2.78   372 1.00
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 14:33:52 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 18:57:04 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -1044,12 +1048,11 @@ known values (weighted by proportion)
                  )
 
     ggplot() +
-      geom_density(data = true_theta
-                   , mapping = aes(x = theta_scaled)
-                   , colour = 'lightgrey'
-                   , fill = 'lightgrey'
-                   , alpha = 0.5
-                   ) +
+      geom_point(data = true_theta
+                 , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+                 ) +
+      scale_fill_discrete(guide = "none") +
+      scale_size_continuous(guide = "none") +
       geom_density_2d(data = estimated_dp3, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
       theme_bw()
 
@@ -1189,7 +1192,7 @@ before.
     ## theta[10] -0.29    0.20 5.08 -9.32 -3.68 -0.42 3.15  9.29   661 1.00
     ## a          0.85    0.04 0.48  0.19  0.51  0.76 1.11  1.97   132 1.04
     ## 
-    ## Samples were drawn using NUTS(diag_e) at Tue May  3 14:40:29 2016.
+    ## Samples were drawn using NUTS(diag_e) at Tue May  3 19:03:44 2016.
     ## For each parameter, n_eff is a crude measure of effective sample size,
     ## and Rhat is the potential scale reduction factor on split chains (at 
     ## convergence, Rhat=1).
@@ -1209,12 +1212,11 @@ thetas to known values (weighted by proportion)
                  )
 
     ggplot() +
-      geom_density(data = true_theta
-                   , mapping = aes(x = theta_scaled)
-                   , colour = 'lightgrey'
-                   , fill = 'lightgrey'
-                   , alpha = 0.5
-                   ) +
+      geom_point(data = true_theta
+                 , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+                 ) +
+      scale_fill_discrete(guide = "none") +
+      scale_size_continuous(guide = "none") +
       geom_density_2d(data = estimated_dp4, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
       theme_bw()
 

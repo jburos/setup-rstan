@@ -6,7 +6,7 @@ output:
   md_document:
     variant: markdown_github
     fig_height: 4
-    fig_width: 12
+    fig_width: 6
 ---
 
 ```{r knitr_options, include=FALSE}
@@ -565,7 +565,14 @@ And, let's compare the combination of proportion & theta to our original data.
 ## weighted distribution of true values of theta
 true_theta <- 
   restaurant %>%
-  mutate(theta_scaled = (theta - global_mean)/global_sd) 
+  mutate(theta_scaled = (theta - global_mean)/global_sd
+         , global_n = n()
+         ) %>%
+  group_by(table_id) %>%
+  summarize(theta_scaled = unique(theta_scaled)
+            , prop = unique(n()/global_n)
+            ) %>%
+  ungroup()
 
 ## weighted distribution of estimated values of theta from DP model
 estimated_theta_dp <- 
@@ -593,13 +600,12 @@ estimated_dp <-
              )
 
 ggplot() +
-  geom_density(data = true_theta
-               , mapping = aes(x = theta_scaled)
-               , colour = 'lightgrey'
-               , fill = 'lightgrey'
-               , alpha = 0.5
-               ) +
-  geom_density_2d(data = estimated_dp, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
+  geom_point(data = true_theta
+             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+             ) +
+  geom_density_2d(data = estimated_dp, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model', fill = 'estimated - DP model')) + 
+  scale_fill_discrete(guide = "none") +
+  scale_size_continuous(guide = "none") +
   theme_bw()
 ```
 
@@ -633,14 +639,13 @@ estimated_mix <-
              )
 
 ggplot() +
-  geom_density(data = true_theta
-               , mapping = aes(x = theta_scaled)
-               , colour = 'lightgrey'
-               , fill = 'lightgrey'
-               , alpha = 0.5
-               ) +
+  geom_point(data = true_theta
+             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+             ) +
   geom_density_2d(data = estimated_dp, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
   geom_density_2d(data = estimated_mix, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - k4 mixture model')) +
+  scale_fill_discrete(guide = "none") +
+  scale_size_continuous(guide = "none") +
   theme_bw()
 ```
 
@@ -775,12 +780,11 @@ estimated_dp2 <-
              )
 
 ggplot() +
-  geom_density(data = true_theta
-               , mapping = aes(x = theta_scaled)
-               , colour = 'lightgrey'
-               , fill = 'lightgrey'
-               , alpha = 0.5
-               ) +
+  geom_point(data = true_theta
+             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+             ) +
+  scale_fill_discrete(guide = "none") +
+  scale_size_continuous(guide = "none") +
   geom_density_2d(data = estimated_dp2, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
   theme_bw()
 ```
@@ -904,12 +908,11 @@ estimated_dp3 <-
              )
 
 ggplot() +
-  geom_density(data = true_theta
-               , mapping = aes(x = theta_scaled)
-               , colour = 'lightgrey'
-               , fill = 'lightgrey'
-               , alpha = 0.5
-               ) +
+  geom_point(data = true_theta
+             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+             ) +
+  scale_fill_discrete(guide = "none") +
+  scale_size_continuous(guide = "none") +
   geom_density_2d(data = estimated_dp3, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
   theme_bw()
 ```
@@ -1041,12 +1044,11 @@ estimated_dp4 <-
              )
 
 ggplot() +
-  geom_density(data = true_theta
-               , mapping = aes(x = theta_scaled)
-               , colour = 'lightgrey'
-               , fill = 'lightgrey'
-               , alpha = 0.5
-               ) +
+  geom_point(data = true_theta
+             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+             ) +
+  scale_fill_discrete(guide = "none") +
+  scale_size_continuous(guide = "none") +
   geom_density_2d(data = estimated_dp4, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
   theme_bw()
 ```
