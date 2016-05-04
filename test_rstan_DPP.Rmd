@@ -1093,19 +1093,22 @@ Pretty much.
 At this point we've implemented several iterations of two models to fit some data generated via a Chinese Resaurant Process 
 
 These models are (broadly):
+
 1. a simple mixture model (MM)
 2. a semi-parametric mixture model with Dirichlet Process (DP) priors
 
 Observations :
+
 1. For these data (with sample size of `{r} nrow(restaurant)`), the MM and DP models fit our data +/- equally as well.
- * We don't yet know if the difference will be more apparent at different (ie larger) sample sizes
+    * We don't yet know if the difference will be more apparent at different (ie larger) sample sizes
 2. In the DP model, we end up proposing many more clusters than we expect will exist, leaving vestigial groups 
- * May consider a penalized likelihood so that the model prefers a smaller number of groups, all things being equal
+    * May consider a penalized likelihood so that the model prefers a smaller number of groups, all things being equal
 3. Most remaining issues are common to both models:
- * Relatively strong influence of priors on the result
- * Label-switching among clusters; this is still a problem although minimized by parameterization
+    * Relatively strong influence of priors on the result
+    * Label-switching among clusters; this is still a problem although minimized by parameterization
 
 Next steps:
+
 1. Re-run analysis with a larger sample size (10k instead of 100)
 2. Look at implementation of TSSB , instead of DP
 
