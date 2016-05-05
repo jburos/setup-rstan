@@ -700,29 +700,31 @@ generated quantities {
 
 ### Fitting Dirichlet-prior model to data 
 
-Try fitting this revised model to our data. For now, start with K = 5 since that's the "ground truth"
+Try fitting this revised model to our data. For now, start with K = 5.
 
 ```{r fit-dp-model-k5, eval = T}
-stan_samples_dp <- stan(model_code = model_string_with_dp,
-                     iter = iter*2,
-                     seed = seed,
-                     data = list(y = restaurant$rescaled_value,
-                                 n = nrow(restaurant),
-                                 K = 5),
-                     control = list(adapt_delta = 0.95, max_treedepth = 13),
-                     model_name = 'Simple mixture model with Dirichlet prior (K = 5)'
-                     )
+stan_samples_dp <- stan(model_code = model_string_with_dp
+                        , iter = iter*2
+                        , seed = seed
+                        , data = list(y = restaurant$rescaled_value,
+                                      n = nrow(restaurant),
+                                      K = 5)
+                        , control = list(adapt_delta = 0.98, max_treedepth = 15)
+                        , model_name = 'Gaussian mixture model with Dirichlet prior'
+                        )
 
 ## look at thetas
 print(stan_samples_dp, pars = c('theta'))
 
 ```
 
-Here I should mention that we increased the number of iterations, and increased the values of adapt_delta & max_treedepth. These settings were determined through trial and error.
+Here I should mention that we increased the number of iterations, and increased the values of adapt_delta & max_treedepth. These settings were determined through trial and error for the sample of random data being considered. For the particular sample used here, the fit may be different.
 
 ### compare dp-derived model to the simple mixture model
 
-Comparing the two models using *loo* yields some differences in overall predictive accuracy. The simple mixture model does appear to fit these data better than the DP process. 
+Comparing the two models using *loo* may show some improvement in leave-one-out predictive performance. However, for a robust comparison we would want to run these two models for many draws of random data (which we will do later). 
+
+First, we need to fine tune the DP model.
 
 ```{r compare-dp-to-simple-model, eval = T}
 
@@ -730,6 +732,89 @@ loo_dp <- loo(rstan::extract(stan_samples_dp,'log_lik')$log_lik)
 loo::compare(loo_dp, loo_k4, loo_k5)
 
 loo::compare(loo_dp, loo_k4)
+
+loo::compare(loo_dp, loo_k5)
+
+```
+
+Now we want to see how well the estimated group-level parameters approximate the true values.
+
+First, we will write this model-evaluating code into a function so we can reuse it later.
+
+```{r function-plot-thetas}
+#' Function to plot estimated mean & size of clusters 
+#' compared to true values.
+#' 
+#' @returns ggplot grob
+#' 
+#' @param stanfit stanfit object containing estimated cluster parameters
+#' @param d data containing "true values" for the parameter for each input obs
+#' @param stanfit_loc_var parameter name for cluster location
+#' @param stanfit_size_var parameter name for cluster proportion
+#' @param d_cluster_id var name in d for cluster identifier
+#' @param d_cluster_val var name in d for cluster-level mean (parameter not value)
+plot_cluster_parameters <- 
+  function(stanfit
+           , d
+           , stanfit_loc_var = 'theta'
+           , stanfit_size_var = 'proportions'
+           , d_cluster_id = 'table_id'
+           , d_cluster_val = 'theta_scaled'
+  ) {
+    
+    # summarize estimates of location & size
+    loc_estimates <- get_sampled_parameter(stanfit
+                               , pars = stanfit_loc_var
+                               , parameter_value = d_cluster_val
+                               , parameter_id = d_cluster_id
+                               )
+    size_estimates <- get_sampled_parameter(stanfit
+                            , pars = stanfit_size_var
+                            , parameter_value = 'prop'
+                            , parameter_id = d_cluster_id
+                            )
+
+    estimates <- loc_estimates %>%
+      inner_join(size_estimates
+                 , by = c(d_cluster_id, 'iter')
+      ) %>%
+      mutate(source = 'estimated clusters')
+    
+    # plot estimated cluster parameters
+    p <- ggplot() + 
+      geom_density_2d(data = estimates
+                      , mapping = aes_string(x = d_cluster_val
+                                             , y = 'prop'
+                                             , colour = 'source'
+                                             , fill = 'source'
+                                             )
+                      ) + 
+      scale_fill_discrete(guide = "none") +
+      scale_size_continuous(guide = "none") +
+      theme_bw() 
+      
+    ## summarize true values 
+    true_values <- d %>%
+      mutate(total_n = n()) %>%
+      group_by_(d_cluster_id) %>%
+      mutate(prop = n()/total_n) %>%
+      summarize_each(funs = funs(mean), matches(d_cluster_val), prop) %>%
+      ungroup() %>%
+      mutate(source = 'true clusters')
+    
+    ## add summarized true values to plot
+    p <- p +
+      geom_point(data = true_values
+                 , mapping = aes_string(x = d_cluster_val, y = 'prop', size = 'prop'
+                                 , colour = 'source'
+                                 , fill = 'source'
+                                 )
+                 ) +
+      ggtitle('Location & size of estimated clusters vs true values')
+    p
+  } 
+  
+plot_cluster_parameters(stan_samples_dp, restaurant)
 
 ```
 
