@@ -709,7 +709,7 @@ stan_samples_dp <- stan(model_code = model_string_with_dp
                         , data = list(y = restaurant$rescaled_value,
                                       n = nrow(restaurant),
                                       K = 5)
-                        , control = list(adapt_delta = 0.98, max_treedepth = 15)
+                        , control = list(adapt_delta = 0.99, max_treedepth = 15)
                         , model_name = 'Gaussian mixture model with Dirichlet prior'
                         )
 
@@ -818,7 +818,9 @@ plot_cluster_parameters(stan_samples_dp, restaurant)
 
 ```
 
-Let's see what happens with the DP model if we increase the number of groups to, say, K = 10.
+Depending on the sample of data used to fit this model, it may or may not fit that well. There are some fundamental problems with this model, since the Stan code was adapted from that used to fit the mixture model, which we will address shortly.
+
+In the meantime, the real value of the DP model is not having to specify the number of groups. Let's see what happens with the DP model if we increase the number of groups to, say, K = 10.
 
 ```{r fit-dp-model-k10, eval = T}
 stan_samples_dp_k10 <- stan(model_code = model_string_with_dp,
@@ -827,7 +829,7 @@ stan_samples_dp_k10 <- stan(model_code = model_string_with_dp,
                      data = list(y = restaurant$rescaled_value,
                                  n = nrow(restaurant),
                                  K = 10),
-                     control = list(adapt_delta = 0.98, max_treedepth = 15),
+                     control = list(adapt_delta = 0.99, max_treedepth = 15),
                      model_name = 'Simple mixture model with Dirichlet prior'
                      )
 
