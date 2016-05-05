@@ -1036,21 +1036,6 @@ Now let's compare the distribution of thetas from this revised model to the grou
 
 ```{r compare-dp2-estimates-theta}
 
-get_sampled_parameter <- function(stanfit, pars, parameter_id = 'parameter_id', parameter_value = 'parameter_value') {
-  estimated_pars <- 
-    rstan::extract(object = stanfit, pars = pars)[[1]] %>%
-    as.data.frame(.)
-  
-  names(estimated_pars) <- seq_len(ncol(estimated_pars))
-  
-  vars_to_rename <- list('parameter_id', 'parameter_value')
-  names(vars_to_rename) <- c(parameter_id, parameter_value)
-  
-  estimated_pars %>%
-    mutate(iter = 1:n()) %>%
-    gather(parameter_id, parameter_value, -iter, convert = T) %>%
-    rename_(.dots = vars_to_rename)
-}
 
 estimated_prop_dp2 <- get_sampled_parameter(stan_samples_dp2, 'proportions', parameter_id = 'cluster_id', parameter_value = 'prop')
 estimated_theta_dp2 <- get_sampled_parameter(stan_samples_dp2, 'theta', parameter_id = 'cluster_id', parameter_value = 'theta_scaled')
