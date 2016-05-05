@@ -909,7 +909,7 @@ transformed parameters {
 
 model {
   ## priors on parameters
-  theta ~ normal(prior_theta_mean, prior_theta_sd);
+  theta ~ normal(0, 1);
   a ~ normal(10, 10);
   proportions ~ dirichlet(alpha);
   
@@ -939,7 +939,7 @@ generated quantities {
 
 ### Fitting adustable-prior model to data 
 
-Try fitting this revised model to our data. For now, start with K = 10 since that's what we did previously. We will increase the prior_theta_sd to 5 to give this some more breathing room (recall that our data are rescaled so 5 is quite large!).
+Try fitting this revised model to our data. For now, start with K = 10 since that's what we did previously.
 
 ```{r fit-dp2-model, eval = T}
 stan_samples_dp2 <- stan(model_code = model_string_with_dp2
@@ -948,11 +948,9 @@ stan_samples_dp2 <- stan(model_code = model_string_with_dp2
                          , data = list(y = restaurant$rescaled_value
                                        , n = nrow(restaurant)
                                        , K = 10
-                                       , prior_theta_mean = 0
-                                       , prior_theta_sd = 5
                                        )
-                         , control = list(adapt_delta = 0.98, max_treedepth = 15)
-                         , model_name = 'Simple mixture model with Dirichlet prior'
+                         , control = list(adapt_delta = 0.99, max_treedepth = 15)
+                         , model_name = 'Gaussian mixture model with Dirichlet prior (v2)'
                          )
 
 ## look at thetas
