@@ -996,13 +996,14 @@ print(stan_samples_dp2, pars = 'a')
 
 estimated_a_dp2 <- get_sampled_parameter(stan_samples_dp2, 'a')
 ggplot() +
-  geom_density(data = estimated_a_dp2, aes(x = log1p(parameter_value), colour = 'estimated values')) + 
-  geom_vline(aes(xintercept = log1p(a), colour = 'true value'))
+  geom_density(data = estimated_a_dp2
+               , aes(x = log1p(parameter_value), colour = 'estimated values')) + 
+  geom_vline(aes(xintercept = log1p(1), colour = 'true value'))
 ```
 
-Nice - this seems to be a reasonable estimate. 
+Hopefully the true value is within the range of estimates drawn from the model. Chances are, the range of values estimated is still quite broad.
 
-Let's write a revised version of this model, so that we can modify the priors on a.
+Let's write a revised version of this model, so that we can modify the priors on a (and, while we're at it, the priors on theta).
 
 ```{r define-dp3-DPP-mod-a-prior}
 model_string_with_dp3 <- "
