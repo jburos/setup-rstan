@@ -861,67 +861,27 @@ print(stan_samples_dp_k10, pars = c('proportions'))
 And, let's compare the combination of proportion & theta to our original data.
 
 ```{r compare-dp-estimates-theta}
-( 
-  ## plot the model & capture ggplot object (grob) for next section 
-  p <- plot_cluster_parameters(stan_samples_dp_k10, restaurant)
-)
+plot_cluster_parameters(stan_samples_dp_k10, restaurant)
 ```
 
 Let's compare this to the same computation using the simple mixture model with K = 4
 
 ```{r compare-dp-k4-estimates-thetas}
+plot_cluster_parameters(stanfit = c('DP (5) model' = stan_samples_dp
+                                    , 'DP (10) model' = stan_samples_dp_k10
+                                    #, 'MM model' = stan_samples_k4
+                                    )
+                        , d = restaurant)
 
-## weighted distribution of estimated values of theta from (k4) mixture model
-estimated_theta_mix <- 
-  rstan::extract(stan_samples_k4,'theta')$theta %>%
-  as.data.frame(.)
-names(estimated_theta_mix) <- 1:4
-estimated_theta_mix <- 
-  estimated_theta_mix %>%
-  mutate(iter = 1:n()) %>%
-  gather(cluster_id, theta_scaled, 1:4, convert = T) 
-
-estimated_prop_mix <- 
-  rstan::extract(stan_samples_k4, 'proportions')$proportions %>%
-  as.data.frame(.)
-names(estimated_prop_mix) <- 1:4
-estimated_prop_mix <- 
-  estimated_prop_mix %>%
-  mutate(iter = 1:n()) %>%
-  gather(cluster_id, prop, 1:4, convert = T)
-
-estimated_mix <- 
-  estimated_theta_mix %>%
-  inner_join(estimated_prop_mix
-             , by = c('cluster_id','iter')
-             )
-
-ggplot() +
-  geom_point(data = true_theta
-             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
-             ) +
-  geom_density_2d(data = estimated_dp, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
-  geom_density_2d(data = estimated_mix, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - k4 mixture model')) +
-  scale_fill_discrete(guide = "none") +
-  scale_size_continuous(guide = "none") +
-  theme_bw()
 ```
 
-My guess is, the reason why we're seeing this vestigial cluster at theta = 0 is due to our prior -- this is set to be gaussian with mean 0  and sd of 1. 
+## Improving the model by unconstraining theta
 
-Let's try relaxing this prior to place less bias on the 0-valued thetas.
-
-## Improving the model by adjusting the priors on theta
-
-While we're at it, let's make a second modification to our model since there is an additional constraint that may not be necessary (or tenable)..
+There is one modification we need to make to our model since it imposes a constraint that may not be necessary (or tenable)..
 
 Namely, the original mixture model forced the thetas to be "ordered" -- without this constraint all clusters would be exchangeable & so we'd have too much class switching (we still have class switching but less of it). 
 
 In this model, forcing the *means* to be ordered is problematic because we have additionally imposed some order on the *size* of each cluster, via the prior on the proportions parameter. There is no reason to think that the largest clusters will also have the smallest means, and so we should now relax one of these two constraints.
-
-Thus, to summarize, we will make two modifications to our model based on the observations above -- 
- 1. allow priors on theta to be passed in as parameters 
- 2. remove *ordered* parameter on the thetas - make this simply be a vector. 
 
 Let's see how well this revised model fits our data.
 
@@ -931,8 +891,6 @@ data {
   int n;
   real y[n];
   int K; ## presumed number of groups
-  real prior_theta_mean;
-  real prior_theta_sd;
 }
 
 parameters {
