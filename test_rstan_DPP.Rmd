@@ -747,7 +747,7 @@ First, we will write this model-evaluating code into a function so we can reuse 
 #' 
 #' @returns ggplot grob
 #' 
-#' @param stanfit stanfit object containing estimated cluster parameters
+#' @param stanfit stanfit objects (optionally, named vector of stanfit objects)
 #' @param d data containing "true values" for the parameter for each input obs
 #' @param stanfit_loc_var parameter name for cluster location
 #' @param stanfit_size_var parameter name for cluster proportion
@@ -761,38 +761,13 @@ plot_cluster_parameters <-
            , d_cluster_id = 'table_id'
            , d_cluster_val = 'theta_scaled'
   ) {
-    
-    # summarize estimates of location & size
-    loc_estimates <- get_sampled_parameter(stanfit
-                               , pars = stanfit_loc_var
-                               , parameter_value = d_cluster_val
-                               , parameter_id = d_cluster_id
-                               )
-    size_estimates <- get_sampled_parameter(stanfit
-                            , pars = stanfit_size_var
-                            , parameter_value = 'prop'
-                            , parameter_id = d_cluster_id
-                            )
-
-    estimates <- loc_estimates %>%
-      inner_join(size_estimates
-                 , by = c(d_cluster_id, 'iter')
-      ) %>%
-      mutate(source = 'estimated clusters')
-    
-    # plot estimated cluster parameters
+    ## initialize plot object 
     p <- ggplot() + 
-      geom_density_2d(data = estimates
-                      , mapping = aes_string(x = d_cluster_val
-                                             , y = 'prop'
-                                             , colour = 'source'
-                                             , fill = 'source'
-                                             )
-                      ) + 
       scale_fill_discrete(guide = "none") +
       scale_size_continuous(guide = "none") +
-      theme_bw() 
-      
+      theme_bw() +
+      ggtitle('Location & size of estimated clusters vs true values')
+    
     ## summarize true values 
     true_values <- d %>%
       mutate(total_n = n()) %>%
@@ -809,8 +784,48 @@ plot_cluster_parameters <-
                                  , colour = 'source'
                                  , fill = 'source'
                                  )
-                 ) +
-      ggtitle('Location & size of estimated clusters vs true values')
+                 ) 
+    
+    ## force stanfit objects into vector
+    if (length(stanfit) == 1) {
+      stanfit <- c('model' = stanfit)
+    }
+    ## apply default naming to vector
+    if (is.null(names(stanfit))) {
+      names(stanfit) <- paste('model ',seq_len(length(stanfit)))
+    }
+    plotdata <- list() ## list of plotdata objects
+    
+    ## for each stanfit object, summarize fit of clusters & add to plot
+    for (sf in seq_len(length(stanfit))) {
+      plotdata[[sf]] <- 
+        get_sampled_parameter(stanfit[[sf]]
+                              , pars = stanfit_loc_var
+                              , parameter_value = d_cluster_val
+                              , parameter_id = d_cluster_id
+                              ) %>%
+        inner_join(get_sampled_parameter(stanfit[[sf]]
+                                         , pars = stanfit_size_var
+                                         , parameter_value = 'prop'
+                                         , parameter_id = d_cluster_id
+                                         )
+                   , by = c(d_cluster_id, 'iter')
+                   ) %>%
+        mutate(source = str_c('estimates from ',names(stanfit)[[sf]])) 
+      
+      ## add data to plot
+      p <- p + 
+        geom_density_2d(data = plotdata[[sf]]
+                        , mapping = aes_string(x = d_cluster_val
+                                               , y = 'prop'
+                                               , colour = 'source'
+                                               , fill = 'source'
+                                               )
+                        , alpha = 0.5
+                        ) 
+    }
+
+    ## return plot object    
     p
   } 
   
@@ -846,51 +861,10 @@ print(stan_samples_dp_k10, pars = c('proportions'))
 And, let's compare the combination of proportion & theta to our original data.
 
 ```{r compare-dp-estimates-theta}
-## weighted distribution of true values of theta
-true_theta <- 
-  restaurant %>%
-  mutate(theta_scaled = (theta - global_mean)/global_sd
-         , global_n = n()
-         ) %>%
-  group_by(table_id) %>%
-  summarize(theta_scaled = unique(theta_scaled)
-            , prop = unique(n()/global_n)
-            ) %>%
-  ungroup()
-
-## weighted distribution of estimated values of theta from DP model
-estimated_theta_dp <- 
-  rstan::extract(stan_samples_dp_k10,'theta')$theta %>%
-  as.data.frame(.)
-names(estimated_theta_dp) <- 1:10
-estimated_theta_dp <- 
-  estimated_theta_dp %>%
-  mutate(iter = 1:n()) %>%
-  gather(cluster_id, theta_scaled, 1:10, convert = T) 
-
-estimated_prop_dp <- 
-  rstan::extract(stan_samples_dp_k10, 'proportions')$proportions %>%
-  as.data.frame(.)
-names(estimated_prop_dp) <- 1:10
-estimated_prop_dp <- 
-  estimated_prop_dp %>%
-  mutate(iter = 1:n()) %>%
-  gather(cluster_id, prop, 1:10, convert = T)
-
-estimated_dp <- 
-  estimated_theta_dp %>%
-  inner_join(estimated_prop_dp
-             , by = c('cluster_id','iter')
-             )
-
-ggplot() +
-  geom_point(data = true_theta
-             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
-             ) +
-  geom_density_2d(data = estimated_dp, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model', fill = 'estimated - DP model')) + 
-  scale_fill_discrete(guide = "none") +
-  scale_size_continuous(guide = "none") +
-  theme_bw()
+( 
+  ## plot the model & capture ggplot object (grob) for next section 
+  p <- plot_cluster_parameters(stan_samples_dp_k10, restaurant)
+)
 ```
 
 Let's compare this to the same computation using the simple mixture model with K = 4
