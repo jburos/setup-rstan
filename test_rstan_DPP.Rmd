@@ -1101,7 +1101,7 @@ And, look again at the distribution of values of a.
 estimated_a_dp3 <- get_sampled_parameter(stan_samples_dp3, 'a')
 ggplot() +
   geom_density(data = estimated_a_dp3, aes(x = log1p(parameter_value), colour = 'estimated values')) + 
-  geom_vline(aes(xintercept = log1p(a), colour = 'true value'))
+  geom_vline(aes(xintercept = log1p(1), colour = 'true value'))
 ```
 
 In general, it seems like we have too little data & thus our estimates are heavily influenced by our priors.
@@ -1110,158 +1110,10 @@ In general, it seems like we have too little data & thus our estimates are heavi
 
 ```{r compare-dp3-to-k4}
 loo_dp3 <- loo(rstan::extract(stan_samples_dp3, 'log_lik')$log_lik)
-loo::compare(loo_dp3, loo_k4)
+loo::compare(loo_dp3, loo_dp2, loo_k4)
 ```
 
 At this point, the k4 model is only marginally better than this "dp3" model.
-
-Just for kicks, let's try a uniform prior on the thetas to see how this model does.
-
-## Model with uniform prior on thetas
-
-Now we're going to try a similar model but remove the prior on the thetas to be basically non-informative.
-
-For sake of sampling efficiency, we will want to bound the values of theta so that the sampler doesn't have to explore the entire sample space -- without a prior, values as large as 1000 as just as plausible as those close to 0. 
-
-This is not an optimal approach in general, but in our case isn't terrible since we will be applying these data to a constrained [0,1] sample space in practice. 
-
-Here is the revised model code:
-
-```{r model-definition-dp4-no-theta-prior}
-model_string_with_dp4 <- "
-data {
-  int n;
-  real y[n];
-  int K; ## presumed number of groups
-  real prior_a_mean;
-  real prior_a_sd;
-}
-
-parameters {
-  simplex[K] proportions;  ## mixing proportion (pis)
-  vector<lower=-10,upper=10>[K] theta;           ## means for each group
-  real<lower=0> sigma;     ## overall sigma; does not vary by group
-  real<lower=0> a;         ## concentration parameter
-}
-
-transformed parameters {
-  vector<lower=0>[K] alpha;
-  for (k in 1:K) {
-    alpha[k] <- a/k;
-  }
-}
-
-model {
-  ## priors on parameters
-  a ~ normal(prior_a_mean, prior_a_sd);
-  proportions ~ dirichlet(alpha);
-  
-  ## compute likelihood for each observation, integrating out discrete-ness of groups
-  for (i in 1:n) {
-    real ps[K]; ## temp holder for log component densities
-    for (k in 1:K) {
-      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
-    }
-    increment_log_prob(log_sum_exp(ps));
-  }
-}
-
-generated quantities {
-  real log_lik[n];
-  
-  for (i in 1:n) {
-    real ps[K]; ## temp holder for log component densities
-    for (k in 1:K) {
-      ps[k] <- log(proportions[k]) + normal_log(y[i], theta[k], sigma);
-    }
-    log_lik[i] <- log_sum_exp(ps);
-  }
-}
-"
-```
-
-### Fitting revised model
-
-Next we fit this model to data, leaving most of the parameters as before.
-
-```{r fit-dp4-model, eval = T}
-stan_samples_dp4 <- stan(model_code = model_string_with_dp4
-                         , iter = iter*2
-                         , seed = seed
-                         , data = list(y = restaurant$rescaled_value
-                                       , n = nrow(restaurant)
-                                       , K = 10
-                                       , prior_a_mean = 0
-                                       , prior_a_sd = 1
-                                       )
-                         , control = list(adapt_delta = 0.98, max_treedepth = 15)
-                         , model_name = 'Simple mixture model with Dirichlet prior'
-                         )
-
-## look at thetas
-print(stan_samples_dp4, pars = c('theta','a'))
-
-```
-
-### comparing estimates of theta to known values 
-
-Finally, we repeat the process above once again to look at similarity of thetas to known values (weighted by proportion)
-
-```{r compare-dp4-estimates-theta}
-
-estimated_prop_dp4 <- get_sampled_parameter(stan_samples_dp4, 'proportions', parameter_id = 'cluster_id', parameter_value = 'prop')
-estimated_theta_dp4 <- get_sampled_parameter(stan_samples_dp4, 'theta', parameter_id = 'cluster_id', parameter_value = 'theta_scaled')
-
-estimated_dp4 <- 
-  estimated_theta_dp4 %>%
-  inner_join(estimated_prop_dp4
-             , by = c('cluster_id','iter')
-             )
-
-ggplot() +
-  geom_point(data = true_theta
-             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
-             ) +
-  scale_fill_discrete(guide = "none") +
-  scale_size_continuous(guide = "none") +
-  geom_density_2d(data = estimated_dp4, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
-  theme_bw()
-```
-
-Appears that even a uniform prior on the thetas is "informative".
-
-### comparing estimates of a to known value
-
-Let's see how this modifies the estimates of values of a.
-
-```{r compare-dp4-estimates-a}
-
-estimated_a_dp4 <- get_sampled_parameter(stan_samples_dp4, 'a')
-ggplot() +
-  geom_density(data = estimated_a_dp4, aes(x = log1p(parameter_value), colour = 'estimated values')) + 
-  geom_vline(aes(xintercept = log1p(a), colour = 'true value'))
-```
-
-Interesting that this model seems to perform much more poorly than that with a more informative prior on thetas.
-
-### Comparing this model's performance to the k4 model
-
-Let's see how this impacts our "loo" estimates.
-
-```{r compare-dp4-to-k4}
-loo_dp4 <- loo(rstan::extract(stan_samples_dp4, 'log_lik')$log_lik)
-loo::compare(loo_dp4, loo_k4)
-```
-
-Definitely worse than the K4 model.
-
-Is it measureably worse than the dp3 model?
-
-```{r compare-dp4-to-dp3}
-loo::compare(loo_dp4, loo_dp3)
-```
-
-Pretty much.
 
 ## Summarizing what we've learned
 
