@@ -165,6 +165,7 @@ ggplot(restaurant, aes(x = value, group = table_id, colour = factor(table_id))) 
 
 ```
 
+
 ## Rescaling data 
 
 Now, let's simulate the data analysis process which will be ignorant of true cluster IDs. 
@@ -173,17 +174,91 @@ First, we would rescale values according to observed mean & sd.
 
 ```{r rescale-data}
 restaurant <- restaurant %>%
-  mutate(global_mean = mean(value),
-         global_sd = sd(value),
-         rescaled_value = (value - global_mean)/global_sd
+  mutate(global_mean = mean(value)
+         , global_sd = sd(value)
+         , rescaled_value = (value - global_mean)/global_sd
+         , theta_scaled = (theta - global_mean)/global_sd
          )
 
-ggplot(restaurant, aes(x = rescaled_value, group = table_id, colour = factor(table_id))) + geom_density()
+ggplot(restaurant
+       , aes(x = rescaled_value
+             , group = table_id
+             , fill = factor(table_id)
+             , colour = factor(table_id))
+       ) + 
+  geom_histogram(position = 'dodge') +
+  theme_bw() +
+  ggtitle('Sampled values by table (cluster) id, after rescaling')
 ```
 
-## Defining the model
+### Writing prep-data function
 
-This is a first pass at fitting this model using Stan, as if it were a simple mixture model.
+Let's wrap these last two steps as functions & append them to our simulate_data function. We'll call the final function **prep_restaurant_data**.
+
+```{r }
+
+## first define the function to add noise to the model
+add_noise <- 
+  function(d
+           , noise_generator = purrr::partial(rnorm, n = 1, mean = 0, sd = 1)
+           , ...
+  ) {
+    d <- d %>%
+      rowwise() %>%
+      mutate(value = theta + noise_generator()) %>%
+      ungroup()
+    return(d)
+  }
+
+## next define a function to rescale the estimated values 
+rescale_values <- 
+  function(d
+           , ...
+  ) {
+    d <- d %>%
+      mutate(global_mean = mean(value)
+             , global_sd = sd(value)
+             , rescaled_value = (value - global_mean)/global_sd
+             , theta_scaled = (theta - global_mean)/global_sd
+      )
+    return(d)
+  }
+
+prep_restaurant_data <- purrr::compose(rescale_values, add_noise, simulate_data)
+
+## test the process
+testthat::test_that(
+  'prep_restaurant_data returns dataset'
+  , {
+    test_rest <- prep_restaurant_data()
+    testthat::expect_is(test_rest, 'data.frame')
+  })
+
+testthat::test_that(
+  'running prep_restaurant_data twice yields different datasets'
+  , {
+    test_rest <- prep_restaurant_data()
+    test_rest2 <- prep_restaurant_data()
+    testthat::expect_false(isTRUE(all.equal(test_rest, test_rest2)))
+  }
+)
+
+testthat::test_that(
+  'prep_restaurant_data returns correct number of rows'
+  , {
+    test_rest <- prep_restaurant_data(n = 100)
+    testthat::expect_equal(nrow(test_rest), 100)
+    test_rest2 <- prep_restaurant_data(n = 500)
+    testthat::expect_equal(nrow(test_rest2), 500)
+  }
+)
+```
+
+We will come back to this function later in our code. For now, we will use the simulated data to define the models we want to use to segment these data.
+
+## Defining the mixture model
+
+As a first pass at fitting this model using Stan, we will define a simple Gaussian mixture model.
 
 ```{r model-code}
 
