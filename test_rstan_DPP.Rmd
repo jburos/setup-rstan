@@ -615,33 +615,36 @@ Note that higher values of elpd_loo are better -- so the first model listed here
 loo::compare(loo_k2, loo_k3, loo_k4, loo_k5)
 ```
 
-The relative differences between the models with k = 3, 4, and 5 are fairly small, however.
+Depending on the data, we might see a "best fit" with k = 3, 4, or 5. In most cases, the relative difference is likely to be small.
 
-The biggest gain is seen between models with K = 2 vs K = 3: 
+To get a sense of whether these differences are "significant", we compare any two models. 
+
+For example, K = 2 vs K = 3: 
 
 ```{r compare-k2-vs-k3}
 loo::compare(loo_k2, loo_k3)
 ```
 
-Looking at K = 3 vs K = 4, however, the difference is minimal:
+and, K = 3 vs K = 4:
 
 ```{r compare-k3-vs-k4}
 loo::compare(loo_k3, loo_k4)
 ```
 
-And, actually worsens for K = 4 vs K = 5
+finally K = 4 vs K = 5:
 
 ```{r compare-k4-vs-k5}
 loo::compare(loo_k4, loo_k5)
 ```
 
-Based on these results, the best fits have K = 3 or K = 4. Ideal result will likely be an average of the two models.
+In practice, Loo can be useful for model comparison -- ie picking the model that best fits the data. In practice, we would likely want to combine results from several models, weighted according to their relative elpd_loo values.
 
 ## Improving the model using Dirichlet prior 
 
-Now that we have a reasonably-well-fitting mixture model, let's see how this can be improved by incorporating a Dirichlet (process) prior. This is not a pure non-parametric implementation, since we are specifying the max possible number of groups (K) but it should get us close.
+Now that we have a reasonably-well-fitting mixture model, let's see whether this can be improved by incorporating a Dirichlet (process) prior. This is not a pure non-parametric implementation, since we are specifying the max possible number of groups (K) but it should get us close.
 
-Since our data were generated according to a dirichlet process (at least we think they were!), it's plausible that this prior may yield a distribution of group sizes that better match our data.
+Since our data were generated according to a dirichlet process (at least we think they were!), it's plausible that this model would yield group sizes that better match our data.
+
 
 ```{r define-dp-model-with-DPP}
 model_string_with_dp <- "
