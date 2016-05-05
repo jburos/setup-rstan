@@ -3,10 +3,14 @@ output:
   pdf_document:
     fig_height: 4
     fig_width: 12
+    toc: yes
+    toc_depth: 1
   md_document:
     variant: markdown_github
-    fig_height: 4
-    fig_width: 6
+    fig_height: 6
+    fig_width: 12
+    toc: yes
+    toc_depth: 1
 ---
 
 ```{r knitr_options, include=FALSE}
