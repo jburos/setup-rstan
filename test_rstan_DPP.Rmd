@@ -294,20 +294,22 @@ model {
 
 ```
 
-Note that we've skipped the "generated quantities" block for now; means we won't be able to do PP checks or run loo. We'll add it back in once we have a model that works well.
+Note that we've skipped the "generated quantities" block for now; this means we won't be able to do PP checks or run loo. 
+
+We'll add it back in once we see how well this model works.
 
 ## Fitting the model in Stan
 
 ```{r fit-model}
 iter <- 500
-seed <- 1235
+seed <- 1235 ## seed value passed to Stan
 stan_samples <- stan(model_code = model_string,
                      iter = iter,
                      seed = seed,
                      data = list(y = restaurant$rescaled_value,
                                  n = nrow(restaurant),
                                  K = 5),
-                     model_name = 'Simple mixture model with K = 5'
+                     model_name = 'Gaussian mixture model'
                      )
 
 # summarize outcome of interest
