@@ -1089,24 +1089,7 @@ print(stan_samples_dp3, pars = c('theta','a'))
 Now, repeating the process above, we look at similarity of thetas to known values (weighted by proportion)
 
 ```{r compare-dp3-estimates-theta}
-
-estimated_prop_dp3 <- get_sampled_parameter(stan_samples_dp3, 'proportions', parameter_id = 'cluster_id', parameter_value = 'prop')
-estimated_theta_dp3 <- get_sampled_parameter(stan_samples_dp3, 'theta', parameter_id = 'cluster_id', parameter_value = 'theta_scaled')
-
-estimated_dp3 <- 
-  estimated_theta_dp3 %>%
-  inner_join(estimated_prop_dp3
-             , by = c('cluster_id','iter')
-             )
-
-ggplot() +
-  geom_point(data = true_theta
-             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
-             ) +
-  scale_fill_discrete(guide = "none") +
-  scale_size_continuous(guide = "none") +
-  geom_density_2d(data = estimated_dp3, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
-  theme_bw()
+plot_cluster_parameters(stan_samples_dp3, restaurant)
 ```
 
 ### comparing estimates of a to known value
