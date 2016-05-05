@@ -569,40 +569,37 @@ loo_k5 <- loo(rstan::extract(stan_samples_k5, 'log_lik')$log_lik)
 
 ```{r stan-example-k3, collapse=TRUE, results = 'hide'}
 ## K = 2
-stan_samples_k2 <- stan(model_code = model_string_with_loglik,
-                     iter = iter,
-                     seed = seed,
-                     data = list(y = restaurant$rescaled_value,
-                                 n = nrow(restaurant),
-                                 K = 2),
-                     model_name = 'Simple mixture model with K = 2 (v2)'
-                     )
+stan_samples_k2 <- stan(model_code = model_string_with_loglik
+                        , iter = iter
+                        , seed = seed
+                        , data = list(y = restaurant$rescaled_value,
+                                      n = nrow(restaurant),
+                                      K = 2)
+                        )
 
 print(stan_samples_k2, pars = 'theta')
 loo_k2 <- loo(rstan::extract(stan_samples_k2, 'log_lik')$log_lik)
 
 ## K = 3
-stan_samples_k3 <- stan(model_code = model_string_with_loglik,
-                     iter = iter,
-                     seed = seed,
-                     data = list(y = restaurant$rescaled_value,
-                                 n = nrow(restaurant),
-                                 K = 3),
-                     model_name = 'Simple mixture model with K = 3 (v2)'
-                     )
+stan_samples_k3 <- stan(model_code = model_string_with_loglik
+                        , iter = iter
+                        , seed = seed
+                        , data = list(y = restaurant$rescaled_value,
+                                      n = nrow(restaurant),
+                                      K = 3)
+                        )
 
 print(stan_samples_k3, pars = 'theta')
 loo_k3 <- loo(rstan::extract(stan_samples_k3, 'log_lik')$log_lik)
 
 ## K = 4
-stan_samples_k4 <- stan(model_code = model_string_with_loglik,
-                     iter = iter,
-                     seed = seed,
-                     data = list(y = restaurant$rescaled_value,
-                                 n = nrow(restaurant),
-                                 K = 4),
-                     model_name = 'Simple mixture model with K = 4 (v2)'
-                     )
+stan_samples_k4 <- stan(model_code = model_string_with_loglik
+                        , iter = iter
+                        , seed = seed
+                        , data = list(y = restaurant$rescaled_value,
+                                      n = nrow(restaurant),
+                                      K = 4)
+                        )
 
 # summarize outcome of interest
 print(stan_samples_k4, pars = 'theta')
