@@ -1019,7 +1019,7 @@ data {
 
 parameters {
   simplex[K] proportions;  ## mixing proportion (pis)
-  vector[K] theta;           ## means for each group
+  vector[K] theta;         ## means for each group
   real<lower=0> sigma;     ## overall sigma; does not vary by group
   real<lower=0> a;         ## concentration parameter
 }
@@ -1076,7 +1076,7 @@ stan_samples_dp3 <- stan(model_code = model_string_with_dp3
                                        , prior_a_sd = 1
                                        )
                          , control = list(adapt_delta = 0.98, max_treedepth = 15)
-                         , model_name = 'Simple mixture model with Dirichlet prior'
+                         , model_name = 'Guassian mixture model with Dirichlet prior (v3)'
                          )
 
 ## look at thetas
