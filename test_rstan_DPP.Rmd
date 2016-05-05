@@ -964,31 +964,23 @@ Note also that we have increased the adapt delta & max_treedepth yet again, base
 
 Now let's compare the distribution of thetas from this revised model to the ground truth.
 
-(we're also going to re-write this into a function since it's likely we'll be using it again.)
-
 ```{r compare-dp2-estimates-theta}
 
+plot_cluster_parameters(stanfit = c('revised model' = stan_samples_dp2)
+                        , d = restaurant
+                        )
 
-estimated_prop_dp2 <- get_sampled_parameter(stan_samples_dp2, 'proportions', parameter_id = 'cluster_id', parameter_value = 'prop')
-estimated_theta_dp2 <- get_sampled_parameter(stan_samples_dp2, 'theta', parameter_id = 'cluster_id', parameter_value = 'theta_scaled')
-
-estimated_dp2 <- 
-  estimated_theta_dp2 %>%
-  inner_join(estimated_prop_dp2
-             , by = c('cluster_id','iter')
-             )
-
-ggplot() +
-  geom_point(data = true_theta
-             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
-             ) +
-  scale_fill_discrete(guide = "none") +
-  scale_size_continuous(guide = "none") +
-  geom_density_2d(data = estimated_dp2, mapping = aes(x = theta_scaled, y = prop, colour = 'estimated - DP model')) +
-  theme_bw()
 ```
 
-Hmm.. Its pretty obvious that the priors on theta are way too strong, even though the clusters have minimal size.
+This yields a very similar, although not identical fit. 
+
+Let's see how Loo ranks these two models.
+
+```{r compare-dp1-dp2-loo}
+loo_dp2 <- loo(rstan::extract(stan_samples_dp2,'log_lik')$log_lik)
+loo_dp_k10 <- loo(rstan::extract(stan_samples_dp_k10,'log_lik')$log_lik)
+loo::compare(loo_dp, loo_dp2, loo_dp_k10, loo_k4)
+```
 
 It also seems like we want to have an even more strongly diminishing likelihood of new clusters - maybe put a stronger prior on the `{r, eval = F} a` parameter.
 
