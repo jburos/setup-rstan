@@ -798,7 +798,7 @@ plot_cluster_parameters <-
       mutate(total_n = n()) %>%
       group_by_(d_cluster_id) %>%
       mutate(prop = n()/total_n) %>%
-      summarize_each(funs = funs(mean), matches(d_cluster_val), prop) %>%
+      summarize_each(funs = funs(unique), matches(d_cluster_val), prop) %>%
       ungroup() %>%
       mutate(source = 'true clusters')
     
