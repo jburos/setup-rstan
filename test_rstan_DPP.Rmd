@@ -22,7 +22,6 @@ opts_chunk$set(fig.width=12,
                message=FALSE,
                NULL)
 
-set.seed(1235)
 # install R packages if necessary:
 if (!require("gtools")) 
   install.packages("gtools", repos="http://cran.rstudio.com")
@@ -57,18 +56,20 @@ options(mc.cores = max(parallel::detectCores(),4))
 
 We're going to try out a few simple models using Dirichlet-process priors, to see how they work in Stan.
 
+Note that the first version of this document used a particular / fixed seed to compare methods for a particular set of simulated data. This revised version is going to compare the methods for a number of iterations, since the best method *on average* may not be the same as the best method for a particular set of data.
+
 ## Generating some fake data
 
-Here we're going to simulate some data according to the [Chinese Resaurant Process]. This is described in this [blog post](http://blog.datumbox.com/the-dirichlet-process-the-chinese-restaurant-process-and-other-representations/) by [Vasilis Vryniotis](http://blog.datumbox.com/author/bbriniotis/).
+Here we're going to simulate some data according to the [Chinese Resaurant Process](https://en.wikipedia.org/wiki/Chinese_restaurant_process). This is described in this [blog post](http://blog.datumbox.com/the-dirichlet-process-the-chinese-restaurant-process-and-other-representations/) by [Vasilis Vryniotis](http://blog.datumbox.com/author/bbriniotis/).
 
-```{r gen-data}
+```{r gen-data-function}
 
 ## function to add a customer to a table
-add_customer <- function(thetas, alpha, base_function) {
+add_customer <- function(alpha, base_function, d = NULL) {
   
-  if (!exists('restaurant')) {
+  if (is.null(d)) {
     ## start with an empty restaurant
-    restaurant <<- data.frame(cust_id = integer(),
+    d <- data.frame(cust_id = integer(),
                          table_id = integer(),
                          theta = numeric(),
                          #value = numeric(),
@@ -78,47 +79,67 @@ add_customer <- function(thetas, alpha, base_function) {
     cust <- 1
     table <- 1
     theta <- base_function()
+    
   } else {
     # subsequent customers sometimes sit at new tables, sometimes join existing tables 
-    num_prev_cust <- nrow(restaurant)
-    num_curr_tables <- max(restaurant$table_id)
+    num_prev_cust <- nrow(d)
+    num_curr_tables <- max(d$table_id)
     cust <- num_prev_cust + 1
     prob_sit_new_table <- alpha / (num_prev_cust + alpha)
-    sit_new_table <- rbinom(1,1,prob_sit_new_table)
+    sit_new_table <- rbinom(1, 1, prob_sit_new_table)
     
     if (sit_new_table == 1) {
+      ## add new table
       table <- num_curr_tables + 1
       theta <- base_function()
     }
     else {
-      table_counts <- restaurant %>% 
+      ## pick from existing tables
+      table_counts <- d %>% 
         group_by(table_id) %>%
-        summarize(prob = n()/(num_prev_cust + alpha)
+        summarize(prob = unique(n()/(num_prev_cust + alpha))
                   , theta = unique(theta)
                   ) %>%
         ungroup()
-      selected_table <- table_counts %>% dplyr::filter(rmultinom(1, 1, table_counts$prob) == 1)
+      selected_table <- 
+        table_counts %>% 
+        dplyr::filter(rmultinom(1, 1, table_counts$prob) == 1)
       table <- selected_table$table_id
       theta <- selected_table$theta
     }
   }  
-    
-  restaurant <<- restaurant %>%
+  ## add customer to dataset
+  d <- d %>%
     dplyr::bind_rows(list(cust_id = cust, table_id = table, theta = theta))
-  return(TRUE)
+  return(d)
 }
 
-# dispersion / parameter (alpha) - larger the value, more frequently new tables are spawned
-a <- 1
+## code to generate data - wrap in a function so we can use this later.
+simulate_data <- 
+  function(a = 1
+           , g_base = purrr::partial(rnorm, n = 1, mean = 10, sd = 5)
+           , n = 100
+  ) {
+    d <- NULL
+    for (i in seq(from = 1, to = n, by = 1)) {
+      d <- 
+        add_customer(alpha = a
+                     , base_function = g_base
+                     , d = d
+                     )
+    }
+    return(d)
+  }
+```
 
-## Base function used to generate new values of theta
-g_base <- purrr::partial(rnorm, n = 1, mean = 10, sd = 5)
+Now that we've defined the function to simulate the data, let's generate our first dataset.
 
+We will use this to build & test the various models, then repeat the process with a variety of seeds to see which method is best on average. 
 
-rm(restaurant)
-for (i in 1:100) {
-  add_customer(thetas = thetas, alpha = a, base_function = g_base)
-}
+```{r sim-data}
+
+set.seed(123)
+restaurant <- simulate_data()
 
 ## summarize
 restaurant %>% 
