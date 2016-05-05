@@ -827,7 +827,7 @@ stan_samples_dp_k10 <- stan(model_code = model_string_with_dp,
                      data = list(y = restaurant$rescaled_value,
                                  n = nrow(restaurant),
                                  K = 10),
-                     control = list(adapt_delta = 0.95, max_treedepth = 13),
+                     control = list(adapt_delta = 0.98, max_treedepth = 15),
                      model_name = 'Simple mixture model with Dirichlet prior'
                      )
 
@@ -838,7 +838,7 @@ print(stan_samples_dp_k10, pars = c('theta'))
 In this case, we're a lot less interested in what happens to the thetas than the proportions.
 
 ```{r dp-model-proportions}
-print(stan_samples_dp_k10, pars = c('theta'))
+print(stan_samples_dp_k10, pars = c('proportions'))
 ```
 
 And, let's compare the combination of proportion & theta to our original data.
