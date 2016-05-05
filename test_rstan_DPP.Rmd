@@ -364,31 +364,126 @@ Next, we plot the observed & true means on the recentered scale
 ```{r plot-true-vs-observed-recentered}
 library(ggplot2)
 ggplot() +
-  geom_density(aes(x = mean_rescaled, group = sample, colour = 'estimated theta'), data = thdata) +
-  geom_vline(aes(xintercept = mean, colour = 'true theta values'), data = restaurant %>% group_by(table_id) %>% summarize(mean = mean(rescaled_value, na.rm = T)) %>% ungroup())
+  geom_density(aes(x = mean_rescaled, group = sample, colour = 'estimated theta')
+               , data = thdata) +
+  geom_vline(aes(xintercept = mean, colour = 'true theta values')
+             , data = 
+               restaurant %>% 
+               group_by(table_id) %>% 
+               summarize(mean = mean(rescaled_value, na.rm = T)) %>% 
+               ungroup()
+             ) +
+  ggtitle('Estimated & actual values of theta, by estimated cluster id')
 ```
 
-And, the observed vs true estimates of theta
+From this plot, we can see that there is some "class switching" in play. 
 
-```{r plot-true-vs-observed}
-library(ggplot2)
-ggplot() +
-  geom_density(aes(x = mean_original, group = sample, colour = 'estimated theta'), data = thdata) +
-  geom_vline(aes(xintercept = true_thetas, colour = 'true theta values'))
+Even though we've constrained the clusters to be ordered so that the cluster with the lowest theta will usually be listed first, we do see that some clusters are bimodal.
+
+We also can't tell whether this model has estimated the relative size of each cluster correctly, since the estimates for the "proportion" parameter aren't displayed here.
+
+Before we go any further, let's improve this plot to make it mode demonstrative. As before, we'll wrap this into a set of functions so we can re-use the code in subsequent model runs.
+
+The first utility function we need will extract a parameter value from the stanfit object & prepare it for plotting. We will make it generic so that it can be reused.
+
+```{r get-sampled-parameter-fun}
+
+get_sampled_parameter <- 
+  function(stanfit
+           , pars
+           , parameter_value = 'parameter_value'
+           , parameter_id = 'parameter_id'
+  ) {
+    
+  estimated_pars <- 
+    rstan::extract(object = stanfit, pars = pars)[[1]] %>%
+    as.data.frame(.)
+  
+  names(estimated_pars) <- seq_len(ncol(estimated_pars))
+  
+  vars_to_rename <- list('parameter_id', 'parameter_value')
+  names(vars_to_rename) <- c(parameter_id, parameter_value)
+  
+  estimated_pars %>%
+    mutate(iter = 1:n()) %>%
+    gather(parameter_id, parameter_value, -iter, convert = T) %>%
+    rename_(.dots = vars_to_rename)
+}
 ```
 
-We notice that even though we have constrained the values of theta to be ordered, there are still some label-switching problems. 
+Let's use this to plot our estimates of theta according to their estimated proportion. We will compare this to the true cluster means & proportions.
 
-IE each 'sample' has a multi-modal distribution of theta. Collapsing these may yield a more complete picture.
+```{r compare-k5-estimates-theta}
 
-```{r plot-true-vs-observed-theta}
-library(ggplot2)
-ggplot() +
-  geom_density(aes(x = mean_original, colour = 'estimated theta'), data = thdata) +
-  geom_vline(aes(xintercept = true_thetas, colour = 'true theta values'))
+## weighted distribution of estimated values of theta from our model
+estimated_theta <- get_sampled_parameter(stan_samples 
+                                         , pars = 'theta'
+                                         , parameter_id = 'cluster_id'
+                                         , parameter_value = 'theta_scaled'
+                                         )
+
+estimated_prop <-  get_sampled_parameter(stan_samples
+                                         , pars = 'proportions'
+                                         , parameter_id = 'cluster_id'
+                                         , parameter_value = 'prop'
+                                         )
+
+estimated_data <- 
+  estimated_theta %>%
+  inner_join(estimated_prop
+             , by = c('cluster_id','iter')
+             )
 ```
 
-Notice how the smoothed estimates look more consistent with a 3-cluster result (ie K = 3), rather than the true value (K = 5).
+We now have a data frame with the assigned cluster_id, proportion & location for each draw from the posterior density.
+
+```{r review-estimates-k5-theta}
+head(estimated_data)
+```
+
+Let's plot these in two-dimensions
+
+```{r plot-estimates-k5-theta}
+## plot locations & proportion irrespective of cluster id
+(plot <- 
+  ggplot() +
+  geom_density_2d(data = estimated_data
+                  , mapping = aes(x = theta_scaled
+                                  , y = prop
+                                  , colour = 'estimated - mixture model'
+                                  , fill = 'estimated - mixture model')
+                  ) + 
+  scale_fill_discrete(guide = "none") +
+  scale_size_continuous(guide = "none") +
+  theme_bw()
+)
+```
+
+Finally, we can overlay the location & proportions of true clusters. Note that these are scaled according to their relative size.
+
+```{r plot-estimates-k5-theta-2}
+
+## weighted distribution of true values of theta
+true_theta <- 
+  restaurant %>%
+  mutate(theta_scaled = (theta - global_mean)/global_sd
+         , global_n = n()
+         ) %>%
+  group_by(table_id) %>%
+  summarize(theta_scaled = unique(theta_scaled)
+            , prop = unique(n()/global_n)
+            ) %>%
+  ungroup()
+
+plot + 
+  geom_point(data = true_theta
+             , mapping = aes(x = theta_scaled, y = prop, size = prop, colour = 'true clusters', fill = 'true clusters')
+             ) +
+  ggtitle('Location & size of estimated clusters, compared to true values')
+
+```
+
+Depending on which draw of the random simulation we are looking at, this may or may not fit our clusters well.
 
 Let's see if Loo can help us distinguish between different values of K.
 
