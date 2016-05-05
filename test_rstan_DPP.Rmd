@@ -13,9 +13,7 @@ output:
 
 ```{r knitr_options, include=FALSE}
 library(knitr)
-opts_chunk$set(fig.width=12, 
-               fig.height=4,
-               fig.path='RmdFigs/',
+opts_chunk$set(fig.path='RmdFigs/',
                warning=FALSE,
                message=FALSE,
                NULL)
@@ -982,7 +980,7 @@ loo_dp_k10 <- loo(rstan::extract(stan_samples_dp_k10,'log_lik')$log_lik)
 loo::compare(loo_dp, loo_dp2, loo_dp_k10, loo_k4)
 ```
 
-It also seems like we want to have an even more strongly diminishing likelihood of new clusters - maybe put a stronger prior on the `{r, eval = F} a` parameter.
+It also seems like we want to have an even more strongly diminishing likelihood of new clusters - maybe put a stronger prior on the `r print('a')` parameter.
 
 ## Improving the model by adjusting priors on a and theta
 
